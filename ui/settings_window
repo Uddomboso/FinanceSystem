@@ -1,0 +1,64 @@
+from PyQt5.QtWidgets import (
+    QWidget, QLabel, QVBoxLayout, QCheckBox, QComboBox,
+    QPushButton, QMessageBox
+)
+from database.db_manager import fetch_one, execute_query
+
+class SettingsWindow(QWidget):
+    def __init__(self, user_id):
+        super().__init__()
+        self.user_id = user_id
+        self.setWindowTitle("settings")
+        self.setMinimumSize(350, 250)
+
+        self.dark_mode = QCheckBox("dark mode")
+        self.notif_box = QCheckBox("enable alerts")
+        self.currency = QComboBox()
+        self.save_btn = QPushButton("save")
+
+        self.init_ui()
+        self.load_settings()
+
+    def init_ui(self):
+        box = QVBoxLayout()
+
+        self.currency.addItems(["USD", "EUR", "GBP", "NGN", "TRY"])
+
+        box.addWidget(QLabel("theme"))
+        box.addWidget(self.dark_mode)
+
+        box.addWidget(QLabel("currency"))
+        box.addWidget(self.currency)
+
+        box.addWidget(self.notif_box)
+        box.addWidget(self.save_btn)
+
+        self.save_btn.clicked.connect(self.save_settings)
+        self.setLayout(box)
+
+    def load_settings(self):
+        q = "select * from settings where user_id = ?"
+        s = fetch_one(q, (self.user_id,))
+        if s:
+            self.dark_mode.setChecked(bool(s["dark_mode"]))
+            self.notif_box.setChecked(bool(s["notifications_enabled"]))
+            idx = self.currency.findText(s["currency"])
+            if idx >= 0:
+                self.currency.setCurrentIndex(idx)
+
+    def save_settings(self):
+        dark = int(self.dark_mode.isChecked())
+        notif = int(self.notif_box.isChecked())
+        curr = self.currency.currentText()
+
+        q = '''
+        insert into settings (user_id, dark_mode, currency, notifications_enabled)
+        values (?, ?, ?, ?)
+        on conflict(user_id) do update set
+        dark_mode = excluded.dark_mode,
+        currency = excluded.currency,
+        notifications_enabled = excluded.notifications_enabled
+        '''
+        execute_query(q, (self.user_id, dark, curr, notif), commit=True)
+
+        QMessageBox.information(self, "saved", "settings updated")
