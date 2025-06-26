@@ -5,14 +5,14 @@ from ui.login_window import LoginWindow  # ✅ New import
 
 
 def main():
-    # Initialize database
+    # database
     initialize_db()
 
-    # Start the application
+    # start app 
     app = QApplication(sys.argv)
     app.setApplicationName("PennyWise - Personal Finance Manager")
 
-    # ✅ Replace placeholder with actual login window
+    # replace
     window = LoginWindow()
     window.show()
 
