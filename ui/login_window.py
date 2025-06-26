@@ -55,7 +55,7 @@ class LoginWindow(QWidget):
             if bcrypt.checkpw(password, stored_hash.encode()):
                 QMessageBox.information(self, "Login Successful", f"Welcome {user['username']}!")
                 self.hide()
-                self.dashboard = UserDashboard(user["username"])
+                self.dashboard = UserDashboard(user["username"], user["user_id"])
                 self.dashboard.show()
             else:
                 QMessageBox.warning(self, "Error", "Invalid password.")
