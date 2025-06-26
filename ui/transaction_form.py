@@ -1,100 +1,88 @@
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout,
-    QComboBox, QHBoxLayout, QTextEdit, QCheckBox, QMessageBox
+    QComboBox, QTextEdit, QCheckBox, QMessageBox
 )
 from PyQt5.QtCore import Qt
-from database.db_manager import fetch_all, execute_query
+from database.db_manager import fetch_all
+from core.transactions import add_txn
 import datetime
-
 
 class TransactionForm(QWidget):
     def __init__(self, user_id):
         super().__init__()
         self.user_id = user_id
-        self.setWindowTitle("Add Transaction")
+        self.setWindowTitle("add transaction")
         self.setMinimumSize(400, 400)
 
         self.amount_input = QLineEdit()
         self.type_input = QComboBox()
-        self.category_input = QComboBox()
-        self.account_input = QComboBox()
-        self.description_input = QTextEdit()
-        self.recurring_input = QCheckBox("Recurring")
+        self.cat_input = QComboBox()
+        self.acc_input = QComboBox()
+        self.note_input = QTextEdit()
+        self.recurring = QCheckBox("recurring")
+        self.save_btn = QPushButton("save")
 
-        self.submit_button = QPushButton("Save Transaction")
+        self.init_ui()
+        self.load_cats()
+        self.load_accs()
 
-        self.setup_ui()
-        self.load_categories()
-        self.load_accounts()
+    def init_ui(self):
+        box = QVBoxLayout()
 
-    def setup_ui(self):
-        layout = QVBoxLayout()
-
-        self.amount_input.setPlaceholderText("Amount (e.g., 120.00)")
+        self.amount_input.setPlaceholderText("amount e.g. 150.00")
         self.type_input.addItems(["expense", "income"])
-        self.description_input.setPlaceholderText("Description (optional)")
+        self.note_input.setPlaceholderText("note or desc (opt)")
 
-        layout.addWidget(QLabel("Amount"))
-        layout.addWidget(self.amount_input)
+        box.addWidget(QLabel("amount"))
+        box.addWidget(self.amount_input)
 
-        layout.addWidget(QLabel("Type"))
-        layout.addWidget(self.type_input)
+        box.addWidget(QLabel("type"))
+        box.addWidget(self.type_input)
 
-        layout.addWidget(QLabel("Category"))
-        layout.addWidget(self.category_input)
+        box.addWidget(QLabel("category"))
+        box.addWidget(self.cat_input)
 
-        layout.addWidget(QLabel("Account"))
-        layout.addWidget(self.account_input)
+        box.addWidget(QLabel("account"))
+        box.addWidget(self.acc_input)
 
-        layout.addWidget(QLabel("Description"))
-        layout.addWidget(self.description_input)
+        box.addWidget(QLabel("description"))
+        box.addWidget(self.note_input)
 
-        layout.addWidget(self.recurring_input)
-        layout.addWidget(self.submit_button)
+        box.addWidget(self.recurring)
+        box.addWidget(self.save_btn)
 
-        self.submit_button.clicked.connect(self.save_transaction)
-        self.setLayout(layout)
+        self.save_btn.clicked.connect(self.save_txn)
+        self.setLayout(box)
 
-    def load_categories(self):
-        rows = fetch_all("SELECT category_id, category_name FROM categories WHERE user_id = ?", (self.user_id,))
-        self.category_input.clear()
-        for row in rows:
-            self.category_input.addItem(row["category_name"], row["category_id"])
+    def load_cats(self):
+        rows = fetch_all("select category_id, category_name from categories where user_id = ?", (self.user_id,))
+        self.cat_input.clear()
+        for r in rows:
+            self.cat_input.addItem(r["category_name"], r["category_id"])
 
-    def load_accounts(self):
-        rows = fetch_all("SELECT account_id, bank_name FROM accounts WHERE user_id = ?", (self.user_id,))
-        self.account_input.clear()
-        for row in rows:
-            display_name = row["bank_name"] or f"Account {row['account_id']}"
-            self.account_input.addItem(display_name, row["account_id"])
+    def load_accs(self):
+        rows = fetch_all("select account_id, bank_name from accounts where user_id = ?", (self.user_id,))
+        self.acc_input.clear()
+        for r in rows:
+            name = r["bank_name"] or f"acc {r['account_id']}"
+            self.acc_input.addItem(name, r["account_id"])
 
-    def save_transaction(self):
+    def save_txn(self):
         try:
-            amount = float(self.amount_input.text())
-            trans_type = self.type_input.currentText()
-            category_id = self.category_input.currentData()
-            account_id = self.account_input.currentData()
-            description = self.description_input.toPlainText()
-            is_recurring = int(self.recurring_input.isChecked())
-            date = datetime.datetime.now()
+            amt = float(self.amount_input.text())
+            tx_type = self.type_input.currentText()
+            cat_id = self.cat_input.currentData()
+            acc_id = self.acc_input.currentData()
+            note = self.note_input.toPlainText()
+            recur = int(self.recurring.isChecked())
+            now = datetime.datetime.now()
 
-            query = '''
-                INSERT INTO transactions (
-                    user_id, account_id, category_id, amount,
-                    transaction_type, description, date, is_recurring
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            '''
-            params = (
-                self.user_id, account_id, category_id,
-                amount, trans_type, description, date, is_recurring
-            )
-            execute_query(query, params, commit=True)
+            add_txn(self.user_id, acc_id, cat_id, amt, tx_type, note, now, recur)
 
-            QMessageBox.information(self, "Success", "Transaction saved.")
+            QMessageBox.information(self, "done", "transaction saved")
             self.close()
 
         except ValueError:
-            QMessageBox.warning(self, "Invalid Input", "Please enter a valid amount.")
+            QMessageBox.warning(self, "oops", "enter a valid number")
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Could not save transaction: {e}")
+            QMessageBox.critical(self, "error", f"couldn’t save: {e}")
