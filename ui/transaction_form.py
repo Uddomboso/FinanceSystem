@@ -3,8 +3,9 @@ from PyQt5.QtWidgets import (
     QComboBox, QTextEdit, QCheckBox, QMessageBox
 )
 from PyQt5.QtCore import Qt
-from database.db_manager import fetch_all
+from database.db_manager import fetch_all, fetch_one
 from core.transactions import add_txn
+from core.currency import convert
 import datetime
 
 class TransactionForm(QWidget):
@@ -21,6 +22,7 @@ class TransactionForm(QWidget):
         self.note_input = QTextEdit()
         self.recurring = QCheckBox("recurring")
         self.save_btn = QPushButton("save")
+        self.convert_lbl = QLabel()
 
         self.init_ui()
         self.load_cats()
@@ -30,11 +32,13 @@ class TransactionForm(QWidget):
         box = QVBoxLayout()
 
         self.amount_input.setPlaceholderText("amount e.g. 150.00")
+        self.amount_input.textChanged.connect(self.show_converted)
         self.type_input.addItems(["expense", "income"])
         self.note_input.setPlaceholderText("note or desc (opt)")
 
         box.addWidget(QLabel("amount"))
         box.addWidget(self.amount_input)
+        box.addWidget(self.convert_lbl)
 
         box.addWidget(QLabel("type"))
         box.addWidget(self.type_input)
@@ -53,6 +57,22 @@ class TransactionForm(QWidget):
 
         self.save_btn.clicked.connect(self.save_txn)
         self.setLayout(box)
+
+    def get_user_currency(self):
+        row = fetch_one("select currency from settings where user_id = ?", (self.user_id,))
+        return row["currency"] if row else "USD"
+
+    def show_converted(self):
+        try:
+            amt = float(self.amount_input.text())
+            curr = self.get_user_currency()
+            result = convert(amt, "USD", curr)
+            if result is not None:
+                self.convert_lbl.setText(f"= {result} {curr}")
+            else:
+                self.convert_lbl.setText("")
+        except:
+            self.convert_lbl.setText("")
 
     def load_cats(self):
         rows = fetch_all("select category_id, category_name from categories where user_id = ?", (self.user_id,))
