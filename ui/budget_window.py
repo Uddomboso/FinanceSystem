@@ -3,7 +3,8 @@ from PyQt5.QtWidgets import (
     QComboBox, QLineEdit, QPushButton, QMessageBox, QProgressBar
 )
 from core.budget import set_budget, get_spent, get_budget
-from database.db_manager import fetch_all
+from database.db_manager import fetch_all, fetch_one
+from core.currency import convert
 
 class BudgetWindow(QWidget):
     def __init__(self, user_id):
@@ -18,7 +19,6 @@ class BudgetWindow(QWidget):
         self.progress = QProgressBar()
 
         self.status_lbl = QLabel()
-        self.amount_lbl = QLabel()
         self.used_lbl = QLabel()
 
         self.init_ui()
@@ -44,15 +44,17 @@ class BudgetWindow(QWidget):
         box.addWidget(self.status_lbl)
 
         self.save_btn.clicked.connect(self.save_budget)
-
         self.setLayout(box)
+
+    def get_user_currency(self):
+        row = fetch_one("select currency from settings where user_id = ?", (self.user_id,))
+        return row["currency"] if row else "USD"
 
     def load_cats(self):
         rows = fetch_all("select category_id, category_name from categories where user_id = ?", (self.user_id,))
         self.cat_select.clear()
         for r in rows:
             self.cat_select.addItem(r["category_name"], r["category_id"])
-
         if rows:
             self.refresh_stats()
 
@@ -64,7 +66,11 @@ class BudgetWindow(QWidget):
         used = get_spent(self.user_id, cat_id)
         limit = get_budget(self.user_id, cat_id)
 
-        self.used_lbl.setText(f"used: ${used:.2f} / ${limit:.2f}")
+        curr = self.get_user_currency()
+        used_c = convert(used, "USD", curr)
+        limit_c = convert(limit, "USD", curr)
+
+        self.used_lbl.setText(f"used: {used_c:.2f} / {limit_c:.2f} {curr}")
 
         if limit > 0:
             pct = int((used / limit) * 100)
