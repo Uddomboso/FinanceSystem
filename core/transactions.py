@@ -1,4 +1,11 @@
 from database.db_manager import execute_query, fetch_all
+from core.currency import convert
+from database.db_manager import fetch_one
+
+def get_user_currency(user_id):
+    row = fetch_one("select currency from settings where user_id = ?", (user_id,))
+    return row["currency"] if row else "USD"
+
 
 def add_txn(user_id, acc_id, cat_id, amt, tx_type, note, date, recurring):
     q = '''
