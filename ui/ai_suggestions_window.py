@@ -1,32 +1,31 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton
-from core.ai_suggestions import get_recent_suggestions, generate_suggestions
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QTextEdit
+from core.ai_suggestions import generate_suggestions
 
-class AiSuggestionsWindow(QWidget):
-    def __init__(self, user_id):
+class AISuggestions(QWidget):
+    def __init__(self, user_id=1):  # temporary hardcoded user_id
         super().__init__()
-        self.user_id = user_id
-        self.setWindowTitle("ai tips")
-        self.setMinimumSize(400, 300)
 
-        self.list = QListWidget()
-        self.refresh_btn = QPushButton("refresh tips")
+        self.setWindowTitle("AI Suggestions")
+        layout = QVBoxLayout()
 
-        self.refresh_btn.clicked.connect(self.load_suggestions)
+        label = QLabel("AI-Based Financial Tips")
+        label.setStyleSheet("font-size: 18px; font-weight: bold; color: #704b3b;")
 
-        box = QVBoxLayout()
-        box.addWidget(QLabel("some smart things we noticed..."))
-        box.addWidget(self.list)
-        box.addWidget(self.refresh_btn)
+        self.text_area = QTextEdit()
+        self.text_area.setReadOnly(True)
+        self.text_area.setStyleSheet("font-size: 14px; background-color: #fff9dc;")
 
-        self.setLayout(box)
-        self.load_suggestions()
+        try:
+            tips_list = generate_suggestions(user_id)
+            if tips_list:
+                tips = "\n\n".join(tips_list)
+            else:
+                tips = "No suggestions yet. Add some budget or transactions."
+        except Exception as e:
+            tips = f"Failed to load suggestions:\n{str(e)}"
 
-    def load_suggestions(self):
-        self.list.clear()
-        generate_suggestions(self.user_id)
-        tips = get_recent_suggestions(self.user_id)
-        if not tips:
-            self.list.addItem("no suggestions yet")
-        else:
-            for t in tips:
-                self.list.addItem(QListWidgetItem(t["content"]))
+        self.text_area.setText(tips)
+
+        layout.addWidget(label)
+        layout.addWidget(self.text_area)
+        self.setLayout(layout)
