@@ -1,6 +1,8 @@
 from database.db_manager import execute_query, fetch_all
 from core.currency import convert
 from database.db_manager import fetch_one
+from database.db_manager import execute_query
+
 
 def get_user_currency(user_id):
     row = fetch_one("select currency from settings where user_id = ?", (user_id,))
@@ -47,3 +49,21 @@ def get_txn_summary_by_cat(user_id):
     order by total desc
     '''
     return fetch_all(q, (user_id,))
+
+def insert_plaid_transaction(user_id, account_id, txn):
+    q = """
+    INSERT INTO transactions (
+        user_id, account_id, category_id, amount,
+        transaction_type, description, date, is_recurring
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    amount = txn["amount"]
+    txn_type = "expense" if amount > 0 else "income"
+    category_id = None  # or assign a default category
+    description = txn.get("name", "Plaid Transaction")
+    date = txn.get("date", "2024-01-01")
+
+    execute_query(q, (
+        user_id, account_id, category_id, amount,
+        txn_type, description, date, 0
+    ), commit=True)
