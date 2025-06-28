@@ -4,8 +4,8 @@ import datetime
 import requests
 
 # Plaid sandbox credentials
-client_id = "685e50141a6ea3002531700b"
-secret = "b4cd671f01f4a4e7c5f03bda5cdfcb"
+client_id = "."
+secret = "."
 base_url = "https://sandbox.plaid.com"
 
 # toggle mock mode (True = use fake data, False = use real Plaid API)
