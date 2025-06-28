@@ -1,39 +1,47 @@
-from database.db_manager import fetch_one, fetch_all, execute_query
+import sqlite3
+import os
 
-def set_budget(user_id, cat_id, amount):
-    # update or set budget amount for a category
-    q = '''
-    update categories set budget_amount = ?
-    where user_id = ? and category_id = ?
-    '''
-    execute_query(q, (amount, user_id, cat_id), commit=True)
+DB_PATH = "pennywise.db"  
+SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "schema.sql")
 
-def get_budget(user_id, cat_id):
-    # get the budget limit for a category
-    q = '''
-    select budget_amount from categories
-    where user_id = ? and category_id = ?
-    '''
-    row = fetch_one(q, (user_id, cat_id))
-    return row["budget_amount"] if row else 0
 
-def get_spent(user_id, cat_id):
-    # get how much the user already spent in a category
-    q = '''
-    select sum(amount) as total_spent from transactions
-    where user_id = ? and category_id = ? and transaction_type = 'expense'
-    '''
-    row = fetch_one(q, (user_id, cat_id))
-    return row["total_spent"] if row and row["total_spent"] else 0
+def connect_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row  
+    return conn
 
-def get_all_budgets(user_id):
-    # return all categories with budget and how much was used
-    q = '''
-    select c.category_id, c.category_name, c.budget_amount,
-    (select sum(t.amount)
-     from transactions t
-     where t.category_id = c.category_id and t.user_id = ? and t.transaction_type = 'expense') as used
-    from categories c
-    where c.user_id = ?
+
+def initialize_db():
+    if not os.path.exists(DB_PATH):
+        with connect_db() as conn:
+            with open(SCHEMA_PATH, "r") as f:
+                conn.executescript(f.read())
+        print("✅ Database initialized.")
+    else:
+        print("📦 Database already exists.")
+
+
+def execute_query(query, params=(), commit=False):
+    with connect_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        if commit:
+            conn.commit()
+        return cursor
+
+
+def fetch_all(query, params=()):
+    cursor = execute_query(query, params)
+    return cursor.fetchall()
+
+
+def fetch_one(query, params=()):
+    cursor = execute_query(query, params)
+    return cursor.fetchone()
+
+def insert_user(email, username, password_hash, role):
+    query = '''
+    INSERT INTO users (email, username, password_hash, role)
+    VALUES (?, ?, ?, ?)
     '''
-    return fetch_all(q, (user_id, user_id))
+    execute_query(query, (email, username, password_hash, role), commit=True)
