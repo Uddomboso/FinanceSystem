@@ -1,13 +1,13 @@
 import sqlite3
 import os
 
-DB_PATH = "pennywise.db"  
+DB_PATH = "pennywise.db"
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "schema.sql")
 
 
 def connect_db():
     conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row  
+    conn.row_factory = sqlite3.Row
     return conn
 
 
@@ -16,9 +16,9 @@ def initialize_db():
         with connect_db() as conn:
             with open(SCHEMA_PATH, "r") as f:
                 conn.executescript(f.read())
-        print("✅ Database initialized.")
+        print(" Database initialized.")
     else:
-        print("📦 Database already exists.")
+        print("Database already exists.")
 
 
 def execute_query(query, params=(), commit=False):
