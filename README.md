@@ -1,6 +1,7 @@
 
 
-FinanceSystem/logopng.png
+![PennyWise Logo](FinanceSystem/logopng.png)
+
 
 PennyWise
 
