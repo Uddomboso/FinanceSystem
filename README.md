@@ -1,6 +1,5 @@
 
 
-![PennyWise Logo](logopng.png)
 
 
 PennyWise
