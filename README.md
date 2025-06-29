@@ -1,3 +1,7 @@
+
+
+FinanceSystem/logopng.png
+
 PennyWise
 
 PennyWise is a personal finance management system designed as a local-first desktop application to help users monitor income, track expenses, manage budgets, and receive AI-powered financial suggestions all while prioritizing privacy and simplicity.
