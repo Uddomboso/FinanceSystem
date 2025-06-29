@@ -1,6 +1,6 @@
 
 
-![PennyWise Logo](FinanceSystem/logopng.png)
+![PennyWise Logo](logopng.png)
 
 
 PennyWise
