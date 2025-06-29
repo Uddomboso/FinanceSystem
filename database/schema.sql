@@ -1,4 +1,4 @@
--- USERS TABLE
+
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT NOT NULL UNIQUE,
@@ -9,7 +9,6 @@ CREATE TABLE IF NOT EXISTS users (
     last_login TIMESTAMP
 );
 
--- SETTINGS TABLE
 CREATE TABLE IF NOT EXISTS settings (
     setting_id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -20,19 +19,19 @@ CREATE TABLE IF NOT EXISTS settings (
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
--- ACCOUNTS TABLE (salary / savings)
 CREATE TABLE IF NOT EXISTS accounts (
-    account_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER PRIMARY KEY AUTOINCREMENT, 
     user_id INTEGER NOT NULL,
+    account_id TEXT NOT NULL, 
     account_type TEXT NOT NULL CHECK(account_type IN ('salary', 'savings')),
     bank_name TEXT,
     currency TEXT DEFAULT 'USD',
-    plaid_token TEXT,  -- Optional bank API token
+    plaid_token TEXT,
     last_sync TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
--- CATEGORIES TABLE
+
 CREATE TABLE IF NOT EXISTS categories (
     category_id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -43,7 +42,7 @@ CREATE TABLE IF NOT EXISTS categories (
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
--- TRANSACTIONS TABLE
+
 CREATE TABLE IF NOT EXISTS transactions (
     transaction_id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -54,13 +53,12 @@ CREATE TABLE IF NOT EXISTS transactions (
     description TEXT,
     date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     is_recurring BOOLEAN DEFAULT 0,
-    recurrence_pattern TEXT,  -- e.g., 'monthly', 'weekly'
+    recurrence_pattern TEXT,  
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
     FOREIGN KEY (account_id) REFERENCES accounts(account_id),
     FOREIGN KEY (category_id) REFERENCES categories(category_id)
 );
 
--- AI SUGGESTIONS TABLE
 CREATE TABLE IF NOT EXISTS ai_suggestions (
     suggestion_id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -70,10 +68,9 @@ CREATE TABLE IF NOT EXISTS ai_suggestions (
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
--- SYSTEM LOGS TABLE
 CREATE TABLE IF NOT EXISTS system_logs (
     log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,  -- nullable for system-level logs
+    user_id INTEGER,
     action TEXT NOT NULL,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     details TEXT,
