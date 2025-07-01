@@ -43,6 +43,11 @@ class UserDashboard(QMainWindow):
         threading.Thread(target=self.run_flask_server, daemon=True).start()
         self.launch_plaid_in_browser()
 
+
+    # test if flask is running 
+    print("🚀 Starting Flask server...")
+    # remove later
+
     def run_flask_server(self):
         app = Flask(__name__)
         dashboard_ref = self
