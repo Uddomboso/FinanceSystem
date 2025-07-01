@@ -97,8 +97,33 @@ class UserDashboard(QMainWindow):
         res = create_link_token(self.user_id)
         token = res.get("link_token")
         if token:
-            url = f"https://cdn.plaid.com/link/v2/stable/link.html?token={token}&isWebview=false&product=auth"
-            webbrowser.open(url)
+            with open("ui/plaid_link.html","w") as f:
+                f.write(f"""
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Link Bank</title>
+        <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+      </head>
+      <body>
+        <h2>Linking Your Bank Account...</h2>
+        <script>
+          var linkHandler = Plaid.create({{
+            token: "{token}",
+            onSuccess: function(public_token, metadata) {{
+              window.location.href = "http://127.0.0.1:5000/success?token=" + public_token;
+            }},
+            onExit: function(err, metadata) {{
+              console.log("Exited Plaid Link", err, metadata);
+            }}
+          }});
+          linkHandler.open();
+        </script>
+      </body>
+    </html>
+                )
+            webbrowser.open("file://" + os.path.abspath("ui/plaid_link.html"))
+
     def init_sidebar(self):
         sidebar = QVBoxLayout()
         sidebar.setAlignment(Qt.AlignTop)
