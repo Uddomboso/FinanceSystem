@@ -34,6 +34,7 @@ def get_all_txns(user_id):
     '''
     txns = fetch_all(q,(user_id,))
 
+
     user_currency = get_user_currency(user_id)
     if user_currency != "USD":
         for txn in txns:
@@ -79,14 +80,12 @@ def insert_plaid_transaction(user_id,account_id,txn):
     if existing:
         return False 
 
-    
     amount = abs(txn["amount"])
     txn_type = "expense" if txn["amount"] > 0 else "income"
 
-
     category_id = None
     if "category" in txn:
-        category_path = " > ".join(txn["category"])
+        category_path = " > ".join(txn["category"]) if isinstance(txn.get("category"), list) else "Uncategorized"
         category = fetch_one('''
             SELECT category_id FROM categories 
             WHERE user_id = ? AND category_name = ?
@@ -101,7 +100,6 @@ def insert_plaid_transaction(user_id,account_id,txn):
         else:
             category_id = category["category_id"]
 
- 
     q = '''
     INSERT INTO transactions (
         user_id, account_id, category_id, amount,
@@ -136,7 +134,6 @@ def get_account_balance(user_id,account_type="salary"):
     if result:
         balance = (result["total_income"] or 0) - (result["total_expenses"] or 0)
 
-  
         user_currency = get_user_currency(user_id)
         if user_currency != "USD":
             balance = convert(balance,"USD",user_currency) or balance
