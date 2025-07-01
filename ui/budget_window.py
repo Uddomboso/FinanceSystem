@@ -58,27 +58,45 @@ class BudgetWindow(QWidget):
         if rows:
             self.refresh_stats()
 
-    def refresh_stats(self):
+    def get_used_and_limit(self):
         cat_id = self.cat_select.currentData()
         if not cat_id:
+            return None,None,None
+
+        # Get spent amount for this category (converted to user currency if needed)
+        spent = get_spent(self.user_id,cat_id)  # from core.budget
+
+        # Get budget limit for this category
+        budget = get_budget(self.user_id,cat_id)  # from core.budget
+
+        # Get user currency from settings
+        curr = self.get_user_currency()
+
+        # Convert spent and budget to user currency if needed
+        spent_c = convert(spent,"USD",curr) if spent is not None else 0.0
+        budget_c = convert(budget,"USD",curr) if budget is not None else 0.0
+
+        return spent_c,budget_c,curr
+
+    def refresh_stats(self):
+        used_c,limit_c,curr = self.get_used_and_limit()
+
+        if used_c is None or limit_c is None:
+            self.used_lbl.setText("No budget set")
+            self.progress.setValue(0)
+            self.status_lbl.setText("no budget set yet")
             return
 
-        used = get_spent(self.user_id, cat_id)
-        limit = get_budget(self.user_id, cat_id)
-
-        curr = self.get_user_currency()
-        used_c = convert(used, "USD", curr)
-        limit_c = convert(limit, "USD", curr)
-
+        curr = curr or "USD"
         self.used_lbl.setText(f"used: {used_c:.2f} / {limit_c:.2f} {curr}")
 
-        if limit > 0:
-            pct = int((used / limit) * 100)
-            self.progress.setValue(min(pct, 100))
-            if used > limit:
-                self.status_lbl.setText("you passed the limit ")
+        if limit_c > 0:
+            pct = int((used_c / limit_c) * 100)
+            self.progress.setValue(min(pct,100))
+            if used_c > limit_c:
+                self.status_lbl.setText("you passed the limit")
             else:
-                self.status_lbl.setText("you're good so far ")
+                self.status_lbl.setText("you're good so far")
         else:
             self.progress.setValue(0)
             self.status_lbl.setText("no budget set yet")
