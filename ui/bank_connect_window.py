@@ -19,7 +19,7 @@ class BankConnectWindow(QWidget):
         self.layout = QVBoxLayout()
         self.setLayout(self.layout)
 
-        self.status_label = QLabel("🔐 Initializing secure Plaid sandbox session...")
+        self.status_label = QLabel("Initializing secure Plaid sandbox session...")
         self.layout.addWidget(self.status_label)
 
         self.instructions = QLabel("""
@@ -54,13 +54,13 @@ class BankConnectWindow(QWidget):
         response = create_link_token(self.user_id)
 
         if "error" in response:
-            self.status_label.setText("❌ Error creating link token.")
+            self.status_label.setText(" Error creating link token.")
             QMessageBox.critical(self,"Plaid Error",response["error"])
             return
 
         token = response.get("link_token")
         if not token:
-            self.status_label.setText("❌ No link token received.")
+            self.status_label.setText("No link token received.")
             return
 
         html = f"""
@@ -97,7 +97,7 @@ class BankConnectWindow(QWidget):
         token_response = exchange_public_token(public_token)
 
         if "error" in token_response or "access_token" not in token_response:
-            self.status_label.setText("❌ Failed to exchange token.")
+            self.status_label.setText("Failed to exchange token.")
             QMessageBox.critical(self,"Error",token_response.get("error","Unknown error"))
             return
 
@@ -146,10 +146,9 @@ class BankConnectWindow(QWidget):
             self.parent_dashboard.update_dashboard()
 
     def display_accounts(self,accounts_data):
-        self.status_label.setText(" Accounts linked successfully")
+        self.status_label.setText("Accounts linked successfully")
         self.web_view.hide()
         self.refresh_btn.show()
-
 
         for i in reversed(range(self.layout.count())):
             widget = self.layout.itemAt(i).widget()
