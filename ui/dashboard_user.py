@@ -42,7 +42,8 @@ class UserDashboard(QMainWindow):
         self.init_pages()
         self.show_dashboard()
 
-        threading.Thread(target=self.run_flask_server, daemon=True).start()
+        
+        self.start_flask_thread()
         self.launch_plaid_in_browser()
 
 
