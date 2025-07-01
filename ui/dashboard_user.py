@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import webbrowser
 from flask import Flask, request
 import threading
+import os
 
 from ui.transaction_form import TransactionForm
 from ui.budget_window import BudgetWindow
