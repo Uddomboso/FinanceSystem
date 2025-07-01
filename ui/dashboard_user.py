@@ -1,15 +1,14 @@
 from PyQt5.QtWidgets import (
-    QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QPushButton,QLabel,
-    QStackedWidget,QFrame,QComboBox,QSizePolicy,QScrollArea
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QStackedWidget, QFrame, QComboBox, QSizePolicy, QScrollArea
 )
-from PyQt5.QtGui import QPixmap,QFont,QIcon
-from PyQt5.QtCore import Qt,QSize
+from PyQt5.QtGui import QPixmap, QFont, QIcon
+from PyQt5.QtCore import Qt, QSize
 import qtawesome as qta
-from datetime import datetime
+from datetime import datetime, timedelta
 import webbrowser
-from flask import Flask,request
+from flask import Flask, request
 import threading
-
 
 from ui.transaction_form import TransactionForm
 from ui.budget_window import BudgetWindow
@@ -17,15 +16,10 @@ from ui.charts_window import ChartsWindow
 from ui.settings_window import SettingsWindow
 from ui.ai_suggestions_window import AISuggestions
 from ui.bank_connect_window import BankConnectWindow
-from database.db_manager import fetch_all,fetch_one
-from core.transactions import get_total_by_type
+from database.db_manager import fetch_all, fetch_one, execute_query
+from core.transactions import get_total_by_type, insert_plaid_transaction
 from core.currency import convert
-from core.plaid_api import create_link_token,exchange_public_token,get_accounts
-from database.db_manager import execute_query
-from core.plaid_api import get_transactions
-from core.transactions import insert_plaid_transaction
-
-
+from core.plaid_api import create_link_token, exchange_public_token, get_accounts, get_transactions
 
 class UserDashboard(QMainWindow):
     def __init__(self, username, user_id):
@@ -55,13 +49,13 @@ class UserDashboard(QMainWindow):
 
         @app.route("/success")
         def plaid_success():
-            print(" Callback received")
+            print("Callback received")
             public_token = request.args.get("token")
-            print("🔑 Public token received:",public_token)
+            print("Public token received:",public_token)
 
             if public_token:
                 data = exchange_public_token(public_token)
-                print("Exchange response:",data)
+                print(" Exchange response:",data)
 
                 access_token = data.get("access_token")
                 if access_token:
@@ -70,17 +64,34 @@ class UserDashboard(QMainWindow):
 
                     for acc in accounts.get("accounts",[]):
                         account_type = "salary" if "checking" in acc.get("subtype","").lower() else "savings"
-                        execute_query("""...""",(...),commit=True)
+                        execute_query("""
+                            INSERT OR REPLACE INTO accounts (
+                                account_id, user_id, bank_name, account_type,
+                                currency, plaid_token, last_sync
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,(
+                            acc["account_id"],
+                            dashboard_ref.user_id,
+                            acc.get("name","Unknown"),
+                            account_type,
+                            acc.get("balances",{}).get("iso_currency_code","USD"),
+                            access_token,
+                            datetime.now().isoformat()
+                        ),commit=True)
 
-                    txns = get_transactions(access_token,...)
+                    start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+                    end = datetime.now().strftime("%Y-%m-%d")
+                    txns = get_transactions(access_token,start,end)
+
                     for txn in txns.get("transactions",[]):
                         insert_plaid_transaction(dashboard_ref.user_id,txn["account_id"],txn)
 
                     dashboard_ref.refresh_dashboard()
 
-            return "<h2>done! You can now close this tab.</h2>"
+            return "<h2> Success! You can now close this tab.</h2>"
 
-        app.run(host="127.0.0.1",port=5000,debug=True)
+
+        app.run(host="127.0.0.1",port=5000,debug=False,use_reloader=False)
 
     def launch_plaid_in_browser(self):
         res = create_link_token(self.user_id)
@@ -162,6 +173,7 @@ class UserDashboard(QMainWindow):
         self.highlight_nav("Link Bank")
         self.launch_plaid_link()
 
+    
     def build_dashboard(self):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -269,7 +281,7 @@ class UserDashboard(QMainWindow):
         section_layout.addWidget(title)
 
         for account in accounts:
-
+ 
             balance = self.calculate_account_balance(account["account_id"])
 
             account_widget = self.create_account_widget(
@@ -335,6 +347,7 @@ class UserDashboard(QMainWindow):
 
         return widget
         self.update_financial_overview(layout)
+
         self.add_recent_activity(layout)
 
         container.setLayout(layout)
@@ -370,13 +383,11 @@ class UserDashboard(QMainWindow):
             "#4CAF50" if balance >= 0 else "#F44336"
         )
 
-
         income_card = self.create_finance_card(
             "Total Income",
             f"{currency} {income:,.2f}",
             "#2196F3"
         )
-
 
         expense_card = self.create_finance_card(
             "Total Expenses",
@@ -467,6 +478,7 @@ class UserDashboard(QMainWindow):
         icon_label.setPixmap(icon.pixmap(24,24))
         layout.addWidget(icon_label)
 
+        # Transaction details
         details = QVBoxLayout()
         details.setSpacing(5)
 
@@ -480,6 +492,7 @@ class UserDashboard(QMainWindow):
         details.addWidget(meta)
         layout.addLayout(details)
 
+        # Amount and date
         right = QVBoxLayout()
         right.setSpacing(5)
         right.setAlignment(Qt.AlignRight)
@@ -576,3 +589,8 @@ class UserDashboard(QMainWindow):
         self.page_dashboard = new_dashboard
         self.stack.insertWidget(0,self.page_dashboard)
         self.stack.setCurrentWidget(self.page_dashboard)
+
+
+
+
+
