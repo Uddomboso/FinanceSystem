@@ -49,49 +49,52 @@ class UserDashboard(QMainWindow):
 
         @app.route("/success")
         def plaid_success():
-            print("Callback received")
-            public_token = request.args.get("token")
-            print("Public token received:",public_token)
+            try:
+                print(" Callback received")
+                public_token = request.args.get("token")
+                print("Public token received:",public_token)
 
-            if public_token:
-                data = exchange_public_token(public_token)
-                print(" Exchange response:",data)
+                if public_token:
+                    data = exchange_public_token(public_token)
+                    print("🎯 Exchange response:",data)
 
-                access_token = data.get("access_token")
-                if access_token:
-                    accounts = get_accounts(access_token)
-                    print(" Retrieved accounts:",accounts)
+                    access_token = data.get("access_token")
+                    if access_token:
+                        accounts = get_accounts(access_token)
+                        print(" Retrieved accounts:",accounts)
 
-                    for acc in accounts.get("accounts",[]):
-                        account_type = "salary" if "checking" in acc.get("subtype","").lower() else "savings"
-                        execute_query("""
-                            INSERT OR REPLACE INTO accounts (
-                                account_id, user_id, bank_name, account_type,
-                                currency, plaid_token, last_sync
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """,(
-                            acc["account_id"],
-                            dashboard_ref.user_id,
-                            acc.get("name","Unknown"),
-                            account_type,
-                            acc.get("balances",{}).get("iso_currency_code","USD"),
-                            access_token,
-                            datetime.now().isoformat()
-                        ),commit=True)
+                        for acc in accounts.get("accounts",[]):
+                            account_type = "salary" if "checking" in acc.get("subtype","").lower() else "savings"
+                            execute_query("""
+                                INSERT OR REPLACE INTO accounts (
+                                    account_id, user_id, bank_name, account_type,
+                                    currency, plaid_token, last_sync
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """,(
+                                acc["account_id"],
+                                dashboard_ref.user_id,
+                                acc.get("name","Unknown"),
+                                account_type,
+                                acc.get("balances",{}).get("iso_currency_code","USD"),
+                                access_token,
+                                datetime.now().isoformat()
+                            ),commit=True)
 
-                    start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-                    end = datetime.now().strftime("%Y-%m-%d")
-                    txns = get_transactions(access_token,start,end)
+                        start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+                        end = datetime.now().strftime("%Y-%m-%d")
+                        txns = get_transactions(access_token,start,end)
 
-                    for txn in txns.get("transactions",[]):
-                        insert_plaid_transaction(dashboard_ref.user_id,txn["account_id"],txn)
+                        for txn in txns.get("transactions",[]):
+                            insert_plaid_transaction(dashboard_ref.user_id,txn["account_id"],txn)
 
-                    dashboard_ref.refresh_dashboard()
+                        dashboard_ref.refresh_dashboard()
 
-            return "<h2> Success! You can now close this tab.</h2>"
+                return "<h2>Success You can now close this tab.</h2>"
 
-
-        app.run(host="127.0.0.1",port=5000,debug=False,use_reloader=False)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return f"<h2>Error:</h2><pre>{e}</pre>",500
 
     def launch_plaid_in_browser(self):
         res = create_link_token(self.user_id)
