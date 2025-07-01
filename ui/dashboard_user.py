@@ -492,7 +492,6 @@ class UserDashboard(QMainWindow):
         details.addWidget(meta)
         layout.addLayout(details)
 
-        # Amount and date
         right = QVBoxLayout()
         right.setSpacing(5)
         right.setAlignment(Qt.AlignRight)
