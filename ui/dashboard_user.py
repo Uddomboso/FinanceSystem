@@ -10,6 +10,7 @@ import webbrowser
 from flask import Flask, request
 import threading
 import os
+import traceback
 
 from ui.transaction_form import TransactionForm
 from ui.budget_window import BudgetWindow
