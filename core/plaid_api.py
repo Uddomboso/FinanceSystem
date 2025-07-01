@@ -3,7 +3,7 @@ import random
 import datetime
 import requests
 
-# Plaid sandbox credentials
+# plaid key and id
 client_id = "."
 secret = "."
 base_url = "https://sandbox.plaid.com"
