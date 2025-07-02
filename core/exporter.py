@@ -1,4 +1,3 @@
-# core/exporter.py
 
 import csv
 from fpdf import FPDF
