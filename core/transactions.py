@@ -1,143 +1,138 @@
-from database.db_manager import execute_query,fetch_all,fetch_one
+
+from PyQt5.QtWidgets import (
+    QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout,
+    QComboBox, QTextEdit, QCheckBox, QMessageBox, QDateEdit
+)
+from PyQt5.QtCore import Qt, QDate
+from database.db_manager import fetch_all, fetch_one
+from core.transactions import add_txn
 from core.currency import convert
-from datetime import datetime
+import datetime
 
+class TransactionForm(QWidget):
+    def __init__(self, user_id):
+        super().__init__()
+        self.user_id = user_id
+        self.setWindowTitle("Add Transaction")
+        self.setMinimumSize(400, 500)
+   
+        self.amount_input = QLineEdit()
+        self.type_input = QComboBox()
+        self.cat_input = QComboBox()
+        self.acc_input = QComboBox()
+        self.note_input = QTextEdit()
+        self.date_input = QDateEdit(QDate.currentDate())
+        self.recurring = QCheckBox("Recurring Transaction")
+        self.save_btn = QPushButton("Save Transaction")
+        self.convert_lbl = QLabel()
 
-def get_user_currency(user_id):
-    row = fetch_one("SELECT currency FROM settings WHERE user_id = ?",(user_id,))
-    return row["currency"] if row else "USD"
+        self.init_ui()
+        self.load_cats()
+        self.load_accs()
 
+    def init_ui(self):
+        layout = QVBoxLayout()
 
-def add_txn(user_id,acc_id,cat_id,amt,tx_type,note,date,recurring):
-    q = '''
-    INSERT INTO transactions (
-        user_id, account_id, category_id, amount,
-        transaction_type, description, date, is_recurring
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    '''
-    p = (user_id,acc_id,cat_id,amt,tx_type,note,date,recurring)
-    execute_query(q,p,commit=True)
+        layout.addWidget(QLabel("Amount"))
+        self.amount_input.setPlaceholderText("e.g. 150.00")
+        self.amount_input.textChanged.connect(self.show_converted)
+        layout.addWidget(self.amount_input)
+        layout.addWidget(self.convert_lbl)
 
+        layout.addWidget(QLabel("Type"))
+        self.type_input.addItems(["Expense", "Income", "Transfer"])
+        layout.addWidget(self.type_input)
 
-def get_all_txns(user_id):
-    q = '''
-    SELECT 
-        t.*, 
-        c.category_name, 
-        a.bank_name,
-        a.account_type
-    FROM transactions t
-    LEFT JOIN categories c ON t.category_id = c.category_id
-    LEFT JOIN accounts a ON t.account_id = a.account_id
-    WHERE t.user_id = ?
-    ORDER BY t.date DESC
-    '''
-    txns = fetch_all(q,(user_id,))
+        layout.addWidget(QLabel("Category"))
+        layout.addWidget(self.cat_input)
 
+        layout.addWidget(QLabel("Account"))
+        layout.addWidget(self.acc_input)
 
-    user_currency = get_user_currency(user_id)
-    if user_currency != "USD":
-        for txn in txns:
-            txn["amount"] = convert(txn["amount"],"USD",user_currency) or txn["amount"]
+        layout.addWidget(QLabel("Date"))
+        self.date_input.setCalendarPopup(True)
+        layout.addWidget(self.date_input)
 
-    return txns
+        layout.addWidget(QLabel("Description"))
+        self.note_input.setPlaceholderText("Optional description")
+        self.note_input.setMaximumHeight(100)
+        layout.addWidget(self.note_input)
 
+        layout.addWidget(self.recurring)
 
-def get_total_by_type(user_id):
-    q = '''
-    SELECT 
-        transaction_type, 
-        SUM(amount) as total
-    FROM transactions
-    WHERE user_id = ?
-    GROUP BY transaction_type
-    '''
-    return fetch_all(q,(user_id,))
+        self.save_btn.clicked.connect(self.save_txn)
+        layout.addWidget(self.save_btn)
 
+        self.setLayout(layout)
 
-def get_txn_summary_by_cat(user_id):
-    q = '''
-    SELECT 
-        c.category_name, 
-        SUM(t.amount) as total,
-        c.color
-    FROM transactions t
-    JOIN categories c ON t.category_id = c.category_id
-    WHERE t.user_id = ? AND t.transaction_type = 'expense'
-    GROUP BY c.category_name
-    ORDER BY total DESC
-    '''
-    return fetch_all(q,(user_id,))
+    def get_user_currency(self):
+        row = fetch_one("SELECT currency FROM settings WHERE user_id = ?", (self.user_id,))
+        return row["currency"] if row else "USD"
 
+    def show_converted(self):
+        try:
+            amt = float(self.amount_input.text())
+            curr = self.get_user_currency()
+            result = convert(amt, "USD", curr)
+            if result is not None:
+                self.convert_lbl.setText(f"≈ {result:.2f} {curr}")
+            else:
+                self.convert_lbl.setText("")
+        except ValueError:
+            self.convert_lbl.setText("")
 
-def insert_plaid_transaction(user_id,account_id,txn):
+    def load_cats(self):
+        rows = fetch_all(
+            "SELECT category_id, category_name FROM categories WHERE user_id = ?", 
+            (self.user_id,)
+        )
+        self.cat_input.clear()
+        self.cat_input.addItem("Select Category", None)
+        for r in rows:
+            self.cat_input.addItem(r["category_name"], r["category_id"])
 
-    existing = fetch_one('''
-        SELECT transaction_id FROM transactions 
-        WHERE user_id = ? AND amount = ? AND date = ? AND description = ?
-    ''',(user_id,abs(txn["amount"]),txn["date"],txn.get("name","")))
+    def load_accs(self):
+        rows = fetch_all(
+            "SELECT account_id, bank_name FROM accounts WHERE user_id = ?", 
+            (self.user_id,)
+        )
+        self.acc_input.clear()
+        self.acc_input.addItem("Select Account", None)
+        for r in rows:
+            name = r["bank_name"] or f"Account {r['account_id']}"
+            self.acc_input.addItem(name, r["account_id"])
 
-    if existing:
-        return False 
+    def save_txn(self):
+        try:
 
-    amount = abs(txn["amount"])
-    txn_type = "expense" if txn["amount"] > 0 else "income"
+            amount = float(self.amount_input.text())
+            tx_type = self.type_input.currentText().lower()
+            cat_id = self.cat_input.currentData()
+            acc_id = self.acc_input.currentData()
+            note = self.note_input.toPlainText()
+            recur = int(self.recurring.isChecked())
+            date = self.date_input.date().toString(Qt.ISODate)
+            
+            if not acc_id:
+                raise ValueError("Please select an account")
+            if not cat_id and tx_type != "transfer":
+                raise ValueError("Please select a category")
 
-    category_id = None
-    if "category" in txn:
-        category_path = " > ".join(txn["category"]) if isinstance(txn.get("category"), list) else "Uncategorized"
-        category = fetch_one('''
-            SELECT category_id FROM categories 
-            WHERE user_id = ? AND category_name = ?
-        ''',(user_id,category_path))
+            add_txn(
+                user_id=self.user_id,
+                acc_id=acc_id,
+                cat_id=cat_id,
+                amt=amount,
+                tx_type=tx_type,
+                note=note,
+                date=date,
+                recurring=recur
+            )
 
-        if not category:
-            execute_query('''
-                INSERT INTO categories (user_id, category_name)
-                VALUES (?, ?)
-            ''',(user_id,category_path),commit=True)
-            category_id = execute_query("SELECT last_insert_rowid()").fetchone()[0]
-        else:
-            category_id = category["category_id"]
+            QMessageBox.information(self, "Success", "Transaction saved successfully")
+            self.close()
 
-    q = '''
-    INSERT INTO transactions (
-        user_id, account_id, category_id, amount,
-        transaction_type, description, date, is_recurring
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    '''
-    execute_query(q,(
-        user_id,
-        account_id,
-        category_id,
-        amount,
-        txn_type,
-        txn.get("name","Plaid Transaction"),
-        txn.get("date",datetime.now().date().isoformat()),
-        0  # is_recurring
-    ),commit=True)
-
-    return True
-
-
-def get_account_balance(user_id,account_type="salary"):
-    q = '''
-    SELECT 
-        SUM(CASE WHEN t.transaction_type = 'income' THEN t.amount ELSE 0 END) as total_income,
-        SUM(CASE WHEN t.transaction_type = 'expense' THEN t.amount ELSE 0 END) as total_expenses
-    FROM transactions t
-    JOIN accounts a ON t.account_id = a.account_id
-    WHERE t.user_id = ? AND a.account_type = ?
-    '''
-    result = fetch_one(q,(user_id,account_type))
-
-    if result:
-        balance = (result["total_income"] or 0) - (result["total_expenses"] or 0)
-
-        user_currency = get_user_currency(user_id)
-        if user_currency != "USD":
-            balance = convert(balance,"USD",user_currency) or balance
-
-        return balance
-
-    return 0
+        except ValueError as e:
+            QMessageBox.warning(self, "Error", str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save transaction: {str(e)}")
