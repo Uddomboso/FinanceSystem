@@ -12,6 +12,7 @@ import threading
 import os
 import traceback
 
+
 from ui.transaction_form import TransactionForm
 from ui.budget_window import BudgetWindow
 from ui.charts_window import ChartsWindow
@@ -29,7 +30,7 @@ class UserDashboard(QMainWindow):
         self.username = username
         self.user_id = user_id
 
-        self.setWindowTitle("PennyWise | Dashboard")
+        self.setWindowTitle("PennyWise")
         self.setMinimumSize(1440, 900)
 
         self.central_widget = QWidget()
@@ -42,14 +43,7 @@ class UserDashboard(QMainWindow):
         self.init_pages()
         self.show_dashboard()
 
-        
         self.start_flask_thread()
-        self.launch_plaid_in_browser()
-
-
-    # test if flask is running 
-    print("🚀 Starting Flask server...")
-    # remove later
 
     def run_flask_server(self):
         app = Flask(__name__)
@@ -60,11 +54,11 @@ class UserDashboard(QMainWindow):
             try:
                 print(" Callback received")
                 public_token = request.args.get("token")
-                print("Public token received:",public_token)
+                print(" Public token received:",public_token)
 
                 if public_token:
                     data = exchange_public_token(public_token)
-                    print("🎯 Exchange response:",data)
+                    print("🎯Exchange response:",data)
 
                     access_token = data.get("access_token")
                     if access_token:
@@ -97,12 +91,14 @@ class UserDashboard(QMainWindow):
 
                         dashboard_ref.refresh_dashboard()
 
-                return "<h2>Success You can now close this tab.</h2>"
+                return "<h2>Success! You can now close this tab.</h2>"
 
             except Exception as e:
-                import traceback
                 traceback.print_exc()
-                return f"<h2>Error:</h2><pre>{e}</pre>",500
+                return f"<h2>❌ Error:</h2><pre>{e}</pre>",500
+
+
+        app.run(port=5000)
 
     def launch_plaid_in_browser(self):
         res = create_link_token(self.user_id)
@@ -132,7 +128,7 @@ class UserDashboard(QMainWindow):
         </script>
       </body>
     </html>
-                )
+                "") # use """) here github seethis as a comment for some reason..
             webbrowser.open("file://" + os.path.abspath("ui/plaid_link.html"))
 
     def init_sidebar(self):
@@ -141,6 +137,7 @@ class UserDashboard(QMainWindow):
         sidebar.setSpacing(20)
         sidebar.setContentsMargins(0,20,0,20)
 
+        
         logo = QLabel()
         pixmap = QPixmap("logopng.png")
         pixmap = pixmap.scaled(150,150,Qt.KeepAspectRatio,Qt.SmoothTransformation)
@@ -148,6 +145,7 @@ class UserDashboard(QMainWindow):
         logo.setAlignment(Qt.AlignCenter)
         sidebar.addWidget(logo)
 
+        
         nav_items = [
             ("Dashboard","fa5s.tachometer-alt",self.show_dashboard),
             ("Transactions","fa5s.exchange-alt",self.show_transactions),
@@ -191,7 +189,7 @@ class UserDashboard(QMainWindow):
         self.page_reports = ChartsWindow(self.user_id)
         self.page_settings = SettingsWindow(self.user_id)
         self.page_ai = AISuggestions(self.user_id)
-        self.page_bank = BankConnectWindow(self.user_id,self)
+        self.page_bank = BankConnectWindow(self.user_id,self)  # Pass self as parent
 
         self.stack.addWidget(self.page_dashboard)
         self.stack.addWidget(self.page_transactions)
@@ -209,7 +207,6 @@ class UserDashboard(QMainWindow):
         self.highlight_nav("Link Bank")
         self.launch_plaid_link()
 
-    
     def build_dashboard(self):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -256,7 +253,7 @@ class UserDashboard(QMainWindow):
                     margin-bottom: 10px;
                 """)
                 account_layout = QHBoxLayout(account_widget)
-
+                
                 icon = qta.icon("fa5s.university", color="#704b3b")
                 icon_label = QLabel()
                 icon_label.setPixmap(icon.pixmap(24, 24))
@@ -317,7 +314,7 @@ class UserDashboard(QMainWindow):
         section_layout.addWidget(title)
 
         for account in accounts:
- 
+  
             balance = self.calculate_account_balance(account["account_id"])
 
             account_widget = self.create_account_widget(
@@ -330,7 +327,7 @@ class UserDashboard(QMainWindow):
         layout.addWidget(section)
 
     def calculate_account_balance(self,account_id):
-
+        # Get all transactions for this account
         transactions = fetch_all("""
                 SELECT amount, transaction_type 
                 FROM transactions 
@@ -382,6 +379,7 @@ class UserDashboard(QMainWindow):
         layout.addWidget(balance_label)
 
         return widget
+
         self.update_financial_overview(layout)
 
         self.add_recent_activity(layout)
@@ -514,7 +512,6 @@ class UserDashboard(QMainWindow):
         icon_label.setPixmap(icon.pixmap(24,24))
         layout.addWidget(icon_label)
 
-        # Transaction details
         details = QVBoxLayout()
         details.setSpacing(5)
 
@@ -617,6 +614,7 @@ class UserDashboard(QMainWindow):
     def show_bank(self):
         self.stack.setCurrentWidget(self.page_bank)
         self.highlight_nav("Link Bank")
+        self.launch_plaid_in_browser()
 
     def refresh_dashboard(self):
         new_dashboard = self.build_dashboard()
@@ -626,6 +624,14 @@ class UserDashboard(QMainWindow):
         self.stack.setCurrentWidget(self.page_dashboard)
 
 
+    def start_flask_thread(self):
+        def run():
+            try:
+                print("🚀 Starting Flask server in thread...")
+                self.run_flask_server()
+            except Exception as e:
+                print("💥 Flask thread crashed:")
+                traceback.print_exc()
 
-
-
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
