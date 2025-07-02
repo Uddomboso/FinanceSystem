@@ -54,7 +54,8 @@ class ChartsWindow(QWidget):
 
         if totals:
             ax.bar(cats, totals, color="#d6733a")
-            ax.set_xticklabels(cats, rotation=45, ha="right")
+            ax.set_xticks(range(len(cats)))  # this sets the positions for the labels
+            ax.set_xticklabels(cats,rotation=45,ha="right")  # this sets the labels
             ax.set_ylabel("amount")
         else:
             ax.text(0.5, 0.5, "no data", ha="center", va="center")
