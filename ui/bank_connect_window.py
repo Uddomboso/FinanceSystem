@@ -19,7 +19,7 @@ class BankConnectWindow(QWidget):
         self.layout = QVBoxLayout()
         self.setLayout(self.layout)
 
-        self.status_label = QLabel("Initializing secure Plaid sandbox session...")
+        self.status_label = QLabel("🔐 Initializing secure Plaid sandbox session...")
         self.layout.addWidget(self.status_label)
 
         self.instructions = QLabel("""
@@ -54,13 +54,13 @@ class BankConnectWindow(QWidget):
         response = create_link_token(self.user_id)
 
         if "error" in response:
-            self.status_label.setText(" Error creating link token.")
+            self.status_label.setText("❌ Error creating link token.")
             QMessageBox.critical(self,"Plaid Error",response["error"])
             return
 
         token = response.get("link_token")
         if not token:
-            self.status_label.setText("No link token received.")
+            self.status_label.setText("❌ No link token received.")
             return
 
         html = f"""
@@ -97,7 +97,7 @@ class BankConnectWindow(QWidget):
         token_response = exchange_public_token(public_token)
 
         if "error" in token_response or "access_token" not in token_response:
-            self.status_label.setText("Failed to exchange token.")
+            self.status_label.setText("❌ Failed to exchange token.")
             QMessageBox.critical(self,"Error",token_response.get("error","Unknown error"))
             return
 
@@ -111,6 +111,7 @@ class BankConnectWindow(QWidget):
             QMessageBox.critical(self,"Error",accounts_data["error"])
             return
 
+        # save to db
         for acc in accounts_data.get("accounts",[]):
             q = """
             INSERT OR REPLACE INTO accounts (
@@ -129,6 +130,7 @@ class BankConnectWindow(QWidget):
                 datetime.datetime.now().isoformat()
             ),commit=True)
 
+        # fetch recent transactions
         start_date = (datetime.datetime.now() - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
         end_date = datetime.datetime.now().strftime("%Y-%m-%d")
         txns_data = get_transactions(access_token,start_date,end_date)
@@ -146,10 +148,11 @@ class BankConnectWindow(QWidget):
             self.parent_dashboard.update_dashboard()
 
     def display_accounts(self,accounts_data):
-        self.status_label.setText("Accounts linked successfully")
+        self.status_label.setText("✅ Accounts linked successfully")
         self.web_view.hide()
         self.refresh_btn.show()
 
+        # clear previous account displays
         for i in reversed(range(self.layout.count())):
             widget = self.layout.itemAt(i).widget()
             if widget and widget not in [self.status_label,self.instructions,self.web_view,self.refresh_btn]:
@@ -185,7 +188,7 @@ class BankConnectWindow(QWidget):
             self.layout.addWidget(account_frame)
 
     def refresh_accounts(self):
-
+        #  all access tokens for this user
         accounts = fetch_all("""
             SELECT DISTINCT plaid_token FROM accounts 
             WHERE user_id = ? AND plaid_token IS NOT NULL
