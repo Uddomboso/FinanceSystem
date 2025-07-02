@@ -1,0 +1,24 @@
+
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Link Bank</title>
+        <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+      </head>
+      <body>
+        <h2>Linking Your Bank Account...</h2>
+        <script>
+          var linkHandler = Plaid.create({
+            token: "link-sandbox-03c3ed3a-fa7f-4650-9211-2f23d3815536",
+            onSuccess: function(public_token, metadata) {
+              window.location.href = "http://127.0.0.1:5000/success?token=" + public_token;
+            },
+            onExit: function(err, metadata) {
+              console.log("Exited Plaid Link", err, metadata);
+            }
+          });
+          linkHandler.open();
+        </script>
+      </body>
+    </html>
+                
