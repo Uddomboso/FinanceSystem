@@ -17,7 +17,7 @@ from ui.transaction_form import TransactionForm
 from ui.budget_window import BudgetWindow
 from ui.charts_window import ChartsWindow
 from ui.settings_window import SettingsWindow
-from ui.ai_suggestions_window import AISuggestions
+from core.ai_suggestions import get_recent_suggestions
 from ui.bank_connect_window import BankConnectWindow
 from database.db_manager import fetch_all, fetch_one, execute_query
 from core.transactions import get_total_by_type, insert_plaid_transaction
@@ -52,18 +52,18 @@ class UserDashboard(QMainWindow):
         @app.route("/success")
         def plaid_success():
             try:
-                print(" Callback received")
+                print("✅ Callback received")
                 public_token = request.args.get("token")
-                print(" Public token received:",public_token)
+                print("🔑 Public token received:",public_token)
 
                 if public_token:
                     data = exchange_public_token(public_token)
-                    print("🎯Exchange response:",data)
+                    print("🎯 Exchange response:",data)
 
                     access_token = data.get("access_token")
                     if access_token:
                         accounts = get_accounts(access_token)
-                        print(" Retrieved accounts:",accounts)
+                        print("✅ Retrieved accounts:",accounts)
 
                         for acc in accounts.get("accounts",[]):
                             account_type = "salary" if "checking" in acc.get("subtype","").lower() else "savings"
@@ -91,7 +91,7 @@ class UserDashboard(QMainWindow):
 
                         dashboard_ref.refresh_dashboard()
 
-                return "<h2>Success! You can now close this tab.</h2>"
+                return "<h2>✅ Success! You can now close this tab.</h2>"
 
             except Exception as e:
                 traceback.print_exc()
@@ -128,7 +128,7 @@ class UserDashboard(QMainWindow):
         </script>
       </body>
     </html>
-                "") # use """) here github seethis as a comment for some reason..
+                """)
             webbrowser.open("file://" + os.path.abspath("ui/plaid_link.html"))
 
     def init_sidebar(self):
@@ -137,7 +137,7 @@ class UserDashboard(QMainWindow):
         sidebar.setSpacing(20)
         sidebar.setContentsMargins(0,20,0,20)
 
-        
+        # Logo
         logo = QLabel()
         pixmap = QPixmap("logopng.png")
         pixmap = pixmap.scaled(150,150,Qt.KeepAspectRatio,Qt.SmoothTransformation)
@@ -145,14 +145,13 @@ class UserDashboard(QMainWindow):
         logo.setAlignment(Qt.AlignCenter)
         sidebar.addWidget(logo)
 
-        
+        # Navigation buttons
         nav_items = [
             ("Dashboard","fa5s.tachometer-alt",self.show_dashboard),
             ("Transactions","fa5s.exchange-alt",self.show_transactions),
             ("Budget","fa5s.money-bill-wave",self.show_budget),
             ("Reports","fa5s.chart-bar",self.show_reports),
             ("Settings","fa5s.cog",self.show_settings),
-            ("AI Tips","fa5s.lightbulb",self.show_ai),
             ("Link Bank","fa5s.university",self.show_bank)
         ]
 
@@ -169,6 +168,7 @@ class UserDashboard(QMainWindow):
 
         sidebar.addStretch()
 
+        # User info
         user_label = QLabel(f"Logged in as:\n{self.username}")
         user_label.setAlignment(Qt.AlignCenter)
         user_label.setStyleSheet("color: white; font-size: 12px;")
@@ -188,7 +188,6 @@ class UserDashboard(QMainWindow):
         self.page_budget = BudgetWindow(self.user_id)
         self.page_reports = ChartsWindow(self.user_id)
         self.page_settings = SettingsWindow(self.user_id)
-        self.page_ai = AISuggestions(self.user_id)
         self.page_bank = BankConnectWindow(self.user_id,self)  # Pass self as parent
 
         self.stack.addWidget(self.page_dashboard)
@@ -196,7 +195,6 @@ class UserDashboard(QMainWindow):
         self.stack.addWidget(self.page_budget)
         self.stack.addWidget(self.page_reports)
         self.stack.addWidget(self.page_settings)
-        self.stack.addWidget(self.page_ai)
         self.stack.addWidget(self.page_bank)
 
         self.main_layout.addWidget(self.stack)
@@ -207,6 +205,11 @@ class UserDashboard(QMainWindow):
         self.highlight_nav("Link Bank")
         self.launch_plaid_link()
 
+    # [Rest of your existing methods remain unchanged...]
+    # build_dashboard, update_financial_overview, create_finance_card, etc.
+    # All other methods should stay exactly as they were in your original code
+
+
     def build_dashboard(self):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -216,11 +219,13 @@ class UserDashboard(QMainWindow):
         layout.setContentsMargins(30, 30, 30, 30)
         layout.setSpacing(30)
 
+        # Header
         header = QLabel(f"Welcome back, {self.username}!")
         header.setFont(QFont("Segoe UI", 32))
         header.setStyleSheet("color: #d6733a;")
         layout.addWidget(header)
 
+        # Bank Accounts Section
         accounts = fetch_all("""
             SELECT a.account_id, a.bank_name, a.account_type,
                    COALESCE(
@@ -253,12 +258,14 @@ class UserDashboard(QMainWindow):
                     margin-bottom: 10px;
                 """)
                 account_layout = QHBoxLayout(account_widget)
-                
+
+                # Bank icon
                 icon = qta.icon("fa5s.university", color="#704b3b")
                 icon_label = QLabel()
                 icon_label.setPixmap(icon.pixmap(24, 24))
                 account_layout.addWidget(icon_label)
 
+                # Account details
                 details = QVBoxLayout()
                 name_label = QLabel(account["bank_name"])
                 name_label.setStyleSheet("font-weight: bold;")
@@ -268,6 +275,7 @@ class UserDashboard(QMainWindow):
                 details.addWidget(type_label)
                 account_layout.addLayout(details)
 
+                # Balance
                 balance = account["balance"] or 0
                 balance_label = QLabel(f"${balance:,.2f}")
                 balance_label.setStyleSheet("""
@@ -279,52 +287,16 @@ class UserDashboard(QMainWindow):
 
                 accounts_layout.addWidget(account_widget)
 
-            layout.addWidget(accounts_section)
-
+        # Financial Overview
         self.update_financial_overview(layout)
 
+        self.add_ai_tips(layout)
+        # Recent Activity
         self.add_recent_activity(layout)
 
         container.setLayout(layout)
         scroll.setWidget(container)
         return scroll
-
-
-    def add_bank_accounts_section(self,layout):
-
-        accounts = fetch_all("""
-                SELECT account_id, bank_name, account_type 
-                FROM accounts 
-                WHERE user_id = ?
-            """,(self.user_id,))
-
-        if not accounts:
-            return
-
-        section = QFrame()
-        section.setStyleSheet("""
-                background-color: white;
-                border-radius: 10px;
-                padding: 20px;
-            """)
-        section_layout = QVBoxLayout(section)
-
-        title = QLabel("Your Bank Accounts")
-        title.setStyleSheet("font-size: 18px; font-weight: bold;")
-        section_layout.addWidget(title)
-
-        for account in accounts:
-  
-            balance = self.calculate_account_balance(account["account_id"])
-
-            account_widget = self.create_account_widget(
-                account["bank_name"],
-                account["account_type"],
-                balance
-            )
-            section_layout.addWidget(account_widget)
-
-        layout.addWidget(section)
 
     def calculate_account_balance(self,account_id):
         # Get all transactions for this account
@@ -352,11 +324,13 @@ class UserDashboard(QMainWindow):
             """)
         layout = QHBoxLayout(widget)
 
+        # Bank icon and name
         icon = qta.icon("fa5s.university",color="#704b3b")
         icon_label = QLabel()
         icon_label.setPixmap(icon.pixmap(24,24))
         layout.addWidget(icon_label)
 
+        # Account details
         details = QVBoxLayout()
         details.setSpacing(5)
 
@@ -370,6 +344,7 @@ class UserDashboard(QMainWindow):
         details.addWidget(type_label)
         layout.addLayout(details)
 
+        # Balance
         balance_label = QLabel(f"${balance:,.2f}")
         balance_label.setStyleSheet("""
                 font-size: 18px; 
@@ -379,30 +354,24 @@ class UserDashboard(QMainWindow):
         layout.addWidget(balance_label)
 
         return widget
-
-        self.update_financial_overview(layout)
-
-        self.add_recent_activity(layout)
-
-        container.setLayout(layout)
-        scroll.setWidget(container)
-        return scroll
-
     def update_financial_overview(self,layout):
-
+        # Get financial data
         totals = get_total_by_type(self.user_id)
         income = next((t["total"] for t in totals if t["transaction_type"] == "income"),0)
         expense = next((t["total"] for t in totals if t["transaction_type"] == "expense"),0)
         balance = income - expense
 
+        # Get user currency
         user_currency = fetch_one("SELECT currency FROM settings WHERE user_id = ?",(self.user_id,))
         currency = user_currency["currency"] if user_currency else "USD"
 
+        # Convert amounts if needed
         if currency != "USD":
             income = convert(income,"USD",currency) or income
             expense = convert(expense,"USD",currency) or expense
             balance = convert(balance,"USD",currency) or balance
 
+        # Overview section
         overview_frame = QFrame()
         overview_frame.setStyleSheet("""
             background-color: white;
@@ -411,18 +380,21 @@ class UserDashboard(QMainWindow):
         """)
         overview_layout = QHBoxLayout(overview_frame)
 
+        # Balance card
         balance_card = self.create_finance_card(
             "Total Balance",
             f"{currency} {balance:,.2f}",
             "#4CAF50" if balance >= 0 else "#F44336"
         )
 
+        # Income card
         income_card = self.create_finance_card(
             "Total Income",
             f"{currency} {income:,.2f}",
             "#2196F3"
         )
 
+        # Expenses card
         expense_card = self.create_finance_card(
             "Total Expenses",
             f"{currency} {expense:,.2f}",
@@ -462,7 +434,7 @@ class UserDashboard(QMainWindow):
         return card
 
     def add_recent_activity(self,layout):
-
+        # Get recent transactions
         transactions = fetch_all("""
             SELECT t.*, c.category_name, a.bank_name 
             FROM transactions t
@@ -504,6 +476,7 @@ class UserDashboard(QMainWindow):
         """)
         layout = QHBoxLayout(widget)
 
+        # Transaction icon
         icon = qta.icon(
             "fa5s.arrow-up" if txn["transaction_type"] == "expense" else "fa5s.arrow-down",
             color="#dc3545" if txn["transaction_type"] == "expense" else "#28a745"
@@ -512,6 +485,7 @@ class UserDashboard(QMainWindow):
         icon_label.setPixmap(icon.pixmap(24,24))
         layout.addWidget(icon_label)
 
+        # Transaction details
         details = QVBoxLayout()
         details.setSpacing(5)
 
@@ -525,6 +499,7 @@ class UserDashboard(QMainWindow):
         details.addWidget(meta)
         layout.addLayout(details)
 
+        # Amount and date
         right = QVBoxLayout()
         right.setSpacing(5)
         right.setAlignment(Qt.AlignRight)
@@ -551,6 +526,7 @@ class UserDashboard(QMainWindow):
         self.stack.insertWidget(0,self.page_dashboard)
         self.stack.setCurrentIndex(0)
 
+    # Navigation methods remain the same as before
     def highlight_nav(self,active_text):
         for text,btn in self.nav_buttons.items():
             if text == active_text:
@@ -594,6 +570,36 @@ class UserDashboard(QMainWindow):
     def show_transactions(self):
         self.stack.setCurrentWidget(self.page_transactions)
         self.highlight_nav("Transactions")
+
+    def add_ai_tips(self,layout):
+        tips = get_recent_suggestions(self.user_id)
+
+        tips_frame = QFrame()
+        tips_frame.setFixedHeight(100)  # Approx. 1 inch
+        tips_frame.setStyleSheet("""
+            background-color: white;
+            border-radius: 10px;
+            padding: 10px;
+        """)
+
+        tips_layout = QVBoxLayout(tips_frame)
+
+        title = QLabel("AI Financial Tips")
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #343a40;")
+        tips_layout.addWidget(title)
+
+        if not tips:
+            no_tips_label = QLabel("No AI tips available yet.")
+            no_tips_label.setStyleSheet("color: #6c757d; font-size: 14px;")
+            tips_layout.addWidget(no_tips_label)
+        else:
+            for tip in tips:
+                tip_label = QLabel(tip["content"])
+                tip_label.setWordWrap(True)
+                tip_label.setStyleSheet("font-size: 14px; margin-bottom: 10px;")
+                tips_layout.addWidget(tip_label)
+
+        layout.addWidget(tips_frame)
 
     def show_budget(self):
         self.stack.setCurrentWidget(self.page_budget)
