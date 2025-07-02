@@ -1,39 +1,48 @@
 from database.db_manager import fetch_all, fetch_one, execute_query
-import openai
+import requests
+import os
 
-openai.api_key = ""
+#gorq api key
+GROQ_API_KEY = os.getenv("GROQ_API_KEY") or "useYourKey"
 
 def generate_openai_tip(summary):
     try:
-        res = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        data = {
+            "model": "llama3-70b-8192",
+            "messages": [
                 {
                     "role": "system",
                     "content": (
                         "You are an expert financial advisor. You analyze budget usage patterns "
                         "and give sharp, personalized tips — not generic ones. Your tone is confident, "
-                        "action-oriented, and always specific."
+                        "action-oriented, and always specific. Tips should include clear actions with numbers where possible."
                     )
                 },
                 {
                     "role": "user",
                     "content": (
-                        f"Here's the user's situation:\n\n"
-                        f"{summary}\n\n"
-                        "Give a short, useful financial tip based on this. Include a clear action, e.g., "
-                        "'reduce dining out to ₺500/month' or 'consider cancelling unused subscriptions'."
+                        f"Here's the user's situation:\n\n{summary}\n\n"
+                        "Give a short, useful financial tip based on this. Be specific and action-focused, e.g., "
+                        "'reduce dining out to ₺500/month' or 'cancel unused streaming services this week'."
                     )
                 }
             ],
-            max_tokens=120,
-            temperature=0.7
-        )
-        return res['choices'][0]['message']['content'].strip()
+            "temperature": 0.8,
+            "max_tokens": 120
+        }
+
+        response = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=data)
+        response.raise_for_status()
+
+        return response.json()["choices"][0]["message"]["content"].strip()
+
     except Exception as e:
         return f"⚠️ AI error: {e}"
-
-
 
 def get_recent_suggestions(user_id):
     q = '''
@@ -42,10 +51,11 @@ def get_recent_suggestions(user_id):
     '''
     return fetch_all(q, (user_id,))
 
+
 def generate_suggestions(user_id):
     tips = []
 
-    # check budget usage
+  
     q = '''
     select c.category_name, c.budget_amount,
     (select sum(t.amount) from transactions t
@@ -57,18 +67,27 @@ def generate_suggestions(user_id):
     rows = fetch_all(q, (user_id, user_id))
     for r in rows:
         used = r["used"] or 0
-        if used > r["budget_amount"]:
+        budget = r["budget_amount"]
+        category = r["category_name"]
+
+        if used > budget:
+            over = used - budget
             summary = (
-                f"The user set a ₺{r['budget_amount']:.2f} budget for {r['category_name']} "
-                f"but has already spent ₺{used:.2f}, going over by ₺{used - r['budget_amount']:.2f}. "
-                "Their income is currently less than expenses. Suggest one strong action."
+                f"The user set a ₺{budget:.2f} budget for {category} but has already spent ₺{used:.2f}, "
+                f"exceeding it by ₺{over:.2f}. Income is currently less than expenses."
             )
             tip = generate_openai_tip(summary)
             tips.append(tip)
-        elif used > 0.8 * r["budget_amount"]:
-            tips.append(f"you're close to the limit on {r['category_name']} — careful spending")
+        elif used > 0.8 * budget:
+            percent = (used / budget) * 100
+            summary = (
+                f"Spending in {category} is at ₺{used:.2f} out of a ₺{budget:.2f} budget "
+                f"({percent:.0f}% used). Suggest a way to cut back before reaching the limit."
+            )
+            tip = generate_openai_tip(summary)
+            tips.append(tip)
 
-    # check most common recurring
+    
     q2 = '''
     select c.category_name, count(*) as freq
     from transactions t
@@ -79,9 +98,14 @@ def generate_suggestions(user_id):
     '''
     top = fetch_one(q2, (user_id,))
     if top:
-        tips.append(f"you have frequent recurring txns in {top['category_name']}")
+        summary = (
+            f"The user has frequent recurring transactions in the {top['category_name']} category. "
+            "Some of these may not be essential."
+        )
+        tip = generate_openai_tip(summary)
+        tips.append(tip)
 
-    # income vs expense check
+   
     q3 = '''
     select transaction_type, sum(amount) as total
     from transactions
@@ -93,13 +117,21 @@ def generate_suggestions(user_id):
     inc = totals.get("income", 0)
     exp = totals.get("expense", 0)
     if inc < exp:
-        tips.append("your spending is more than your income right now")
+        summary = (
+            f"The user's total income is ₺{inc:.2f} while total expenses are ₺{exp:.2f}. "
+            "They are spending more than they earn this month."
+        )
+        tip = generate_openai_tip(summary)
+        tips.append(tip)
 
     # save to db
     for t in tips:
-        insert_tip(user_id, t)
+        print("SAVING SUGGESTION:",t,"| USER_ID:",user_id)  # Debug print
+        if "⚠️ AI error" not in t and "more than your income" not in t.lower():
+            insert_tip(user_id,t)
 
     return tips
+
 
 def insert_tip(user_id, content):
     q = '''
