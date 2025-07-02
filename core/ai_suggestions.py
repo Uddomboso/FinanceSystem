@@ -8,14 +8,31 @@ def generate_openai_tip(summary):
         res = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are a friendly financial assistant helping users improve their habits."},
-                {"role": "user", "content": f"Turn this into a helpful tip for the user:\n\n{summary}"}
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an expert financial advisor. You analyze budget usage patterns "
+                        "and give sharp, personalized tips — not generic ones. Your tone is confident, "
+                        "action-oriented, and always specific."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Here's the user's situation:\n\n"
+                        f"{summary}\n\n"
+                        "Give a short, useful financial tip based on this. Include a clear action, e.g., "
+                        "'reduce dining out to ₺500/month' or 'consider cancelling unused subscriptions'."
+                    )
+                }
             ],
-            max_tokens=100
+            max_tokens=120,
+            temperature=0.7
         )
         return res['choices'][0]['message']['content'].strip()
     except Exception as e:
         return f"⚠️ AI error: {e}"
+
 
 
 def get_recent_suggestions(user_id):
@@ -41,7 +58,11 @@ def generate_suggestions(user_id):
     for r in rows:
         used = r["used"] or 0
         if used > r["budget_amount"]:
-            summary = f"user exceeded their {r['category_name']} budget by ${used - r['budget_amount']:.2f}"
+            summary = (
+                f"The user set a ₺{r['budget_amount']:.2f} budget for {r['category_name']} "
+                f"but has already spent ₺{used:.2f}, going over by ₺{used - r['budget_amount']:.2f}. "
+                "Their income is currently less than expenses. Suggest one strong action."
+            )
             tip = generate_openai_tip(summary)
             tips.append(tip)
         elif used > 0.8 * r["budget_amount"]:
