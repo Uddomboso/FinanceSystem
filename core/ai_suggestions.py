@@ -1,4 +1,22 @@
 from database.db_manager import fetch_all, fetch_one, execute_query
+import openai
+
+openai.api_key = ""
+
+def generate_openai_tip(summary):
+    try:
+        res = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a friendly financial assistant helping users improve their habits."},
+                {"role": "user", "content": f"Turn this into a helpful tip for the user:\n\n{summary}"}
+            ],
+            max_tokens=100
+        )
+        return res['choices'][0]['message']['content'].strip()
+    except Exception as e:
+        return f"⚠️ AI error: {e}"
+
 
 def get_recent_suggestions(user_id):
     q = '''
@@ -23,7 +41,9 @@ def generate_suggestions(user_id):
     for r in rows:
         used = r["used"] or 0
         if used > r["budget_amount"]:
-            tips.append(f"you passed your {r['category_name']} budget by ${used - r['budget_amount']:.2f}")
+            summary = f"user exceeded their {r['category_name']} budget by ${used - r['budget_amount']:.2f}"
+            tip = generate_openai_tip(summary)
+            tips.append(tip)
         elif used > 0.8 * r["budget_amount"]:
             tips.append(f"you're close to the limit on {r['category_name']} — careful spending")
 
