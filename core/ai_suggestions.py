@@ -2,11 +2,15 @@ from database.db_manager import fetch_all, fetch_one, execute_query
 import requests
 import os
 
-#gorq api key
-GROQ_API_KEY = os.getenv("GROQ_API_KEY") or "useYourKey"
+# Set this as an env var or paste your key directly
+GROQ_API_KEY = os.getenv("GROQ_API_KEY") or "."
+
 
 def generate_openai_tip(summary):
     try:
+        if not GROQ_API_KEY:
+            return "⚠️ API key not configured"
+
         headers = {
             "Authorization": f"Bearer {GROQ_API_KEY}",
             "Content-Type": "application/json"
@@ -17,45 +21,67 @@ def generate_openai_tip(summary):
             "messages": [
                 {
                     "role": "system",
-                    "content": (
-                        "You are an expert financial advisor. You analyze budget usage patterns "
-                        "and give sharp, personalized tips — not generic ones. Your tone is confident, "
-                        "action-oriented, and always specific. Tips should include clear actions with numbers where possible."
-                    )
+                    "content": "You are a top-tier financial advisor. Be brief, impactful, and specific."
                 },
                 {
                     "role": "user",
-                    "content": (
-                        f"Here's the user's situation:\n\n{summary}\n\n"
-                        "Give a short, useful financial tip based on this. Be specific and action-focused, e.g., "
-                        "'reduce dining out to ₺500/month' or 'cancel unused streaming services this week'."
-                    )
+                    "content": f"User issue:\n{summary}\n\nGive **1 short financial tip** (1-2 sentences max). Make the intro sentence strong, avoid fluff."
                 }
             ],
-            "temperature": 0.8,
-            "max_tokens": 120
+            "temperature": 0.7,
+            "max_tokens": 100
         }
 
-        response = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=data)
-        response.raise_for_status()
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers=headers,
+            json=data,
+            timeout=10
+        )
 
+        if response.status_code == 429:
+            return "⚠️ API quota exceeded - upgrade your plan"
+        elif response.status_code == 401:
+            return "⚠️ Invalid API key"
+
+        response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"].strip()
 
+    except requests.exceptions.RequestException as e:
+        return f"⚠️ API error: {str(e)}"
     except Exception as e:
-        return f"⚠️ AI error: {e}"
+        return f"⚠️ Error generating tip: {str(e)}"
 
 def get_recent_suggestions(user_id):
-    q = '''
-    select * from ai_suggestions
-    where user_id = ? order by generated_at desc
-    '''
-    return fetch_all(q, (user_id,))
+    try:
+        # Verify table exists first
+        table_exists = fetch_one("""
+            SELECT name FROM sqlite_master 
+            WHERE type='table' AND name='ai_suggestions'
+        """)
+
+        if not table_exists:
+            print("⚠️ ai_suggestions table doesn't exist")
+            return []
+
+        q = '''
+        SELECT * FROM ai_suggestions
+        WHERE user_id = ? 
+        ORDER BY generated_at DESC
+        LIMIT 3
+        '''
+        return fetch_all(q,(user_id,))
+
+    except Exception as e:
+        print(f"❌ Error fetching suggestions: {e}")
+        traceback.print_exc()
+        return []
 
 
 def generate_suggestions(user_id):
     tips = []
 
-  
+    # check budget usage
     q = '''
     select c.category_name, c.budget_amount,
     (select sum(t.amount) from transactions t
@@ -87,7 +113,7 @@ def generate_suggestions(user_id):
             tip = generate_openai_tip(summary)
             tips.append(tip)
 
-    
+    # most common recurring transaction
     q2 = '''
     select c.category_name, count(*) as freq
     from transactions t
@@ -105,7 +131,7 @@ def generate_suggestions(user_id):
         tip = generate_openai_tip(summary)
         tips.append(tip)
 
-   
+    # income vs expense check
     q3 = '''
     select transaction_type, sum(amount) as total
     from transactions
@@ -125,8 +151,8 @@ def generate_suggestions(user_id):
         tips.append(tip)
 
     # save to db
-    for t in tips:
-        print("SAVING SUGGESTION:",t,"| USER_ID:",user_id)  # Debug print
+    saved = 0
+    for t in tips[:2]:  # get only first 2
         if "⚠️ AI error" not in t and "more than your income" not in t.lower():
             insert_tip(user_id,t)
 
