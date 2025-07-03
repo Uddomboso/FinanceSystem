@@ -12,7 +12,7 @@ import threading
 import os
 import traceback
 
-
+from core.ai_suggestions import get_recent_suggestions, generate_suggestions
 from ui.transaction_form import TransactionForm
 from ui.budget_window import BudgetWindow
 from ui.charts_window import ChartsWindow
@@ -41,6 +41,7 @@ class UserDashboard(QMainWindow):
 
         self.init_sidebar()
         self.init_pages()
+        generate_suggestions(self.user_id)
         self.show_dashboard()
 
         self.start_flask_thread()
@@ -52,18 +53,18 @@ class UserDashboard(QMainWindow):
         @app.route("/success")
         def plaid_success():
             try:
-                print("✅ Callback received")
+                print("Callback received")
                 public_token = request.args.get("token")
-                print("🔑 Public token received:",public_token)
+                print("Public token received:",public_token)
 
                 if public_token:
                     data = exchange_public_token(public_token)
-                    print("🎯 Exchange response:",data)
+                    print(" Exchange response:",data)
 
                     access_token = data.get("access_token")
                     if access_token:
                         accounts = get_accounts(access_token)
-                        print("✅ Retrieved accounts:",accounts)
+                        print("Retrieved accounts:",accounts)
 
                         for acc in accounts.get("accounts",[]):
                             account_type = "salary" if "checking" in acc.get("subtype","").lower() else "savings"
@@ -91,11 +92,11 @@ class UserDashboard(QMainWindow):
 
                         dashboard_ref.refresh_dashboard()
 
-                return "<h2>✅ Success! You can now close this tab.</h2>"
+                return "<h2> Success! You can now close this tab.</h2>"
 
             except Exception as e:
                 traceback.print_exc()
-                return f"<h2>❌ Error:</h2><pre>{e}</pre>",500
+                return f"<h2> Error:</h2><pre>{e}</pre>",500
 
 
         app.run(port=5000)
@@ -572,34 +573,39 @@ class UserDashboard(QMainWindow):
         self.highlight_nav("Transactions")
 
     def add_ai_tips(self,layout):
-        tips = get_recent_suggestions(self.user_id)
+        print(" Fetching AI tips for user:",self.user_id)
 
-        tips_frame = QFrame()
-        tips_frame.setFixedHeight(100)  # Approx. 1 inch
-        tips_frame.setStyleSheet("""
-            background-color: white;
-            border-radius: 10px;
-            padding: 10px;
-        """)
+        try:
+            tips = get_recent_suggestions(self.user_id)
+            print(f" Found {len(tips)} tips")
 
-        tips_layout = QVBoxLayout(tips_frame)
+            if not tips:
+                no_tips = QLabel("No financial tips available yet.")
+                no_tips.setStyleSheet("color: #6c757d; font-style: italic;")
+                layout.addWidget(no_tips)
+            else:
+                # Just show the first tip only
+                first_tip = tips[0]
 
-        title = QLabel("AI Financial Tips")
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #343a40;")
-        tips_layout.addWidget(title)
-
-        if not tips:
-            no_tips_label = QLabel("No AI tips available yet.")
-            no_tips_label.setStyleSheet("color: #6c757d; font-size: 14px;")
-            tips_layout.addWidget(no_tips_label)
-        else:
-            for tip in tips:
-                tip_label = QLabel(tip["content"])
+                tip_label = QLabel(first_tip["content"])
                 tip_label.setWordWrap(True)
-                tip_label.setStyleSheet("font-size: 14px; margin-bottom: 10px;")
-                tips_layout.addWidget(tip_label)
+                tip_label.setStyleSheet("""
+                    background-color: white;
+                    padding: 20px;
+                    border-radius: 10px;
+                    font-size: 15px;
+                    font-family: 'Segoe UI', sans-serif;
+                    color: #333;
+                    border-left: 4px solid #d6733a;
+                """)
 
-        layout.addWidget(tips_frame)
+                layout.addWidget(tip_label)
+
+        except Exception as e:
+            print(f" Error displaying tips: {e}")
+            error_label = QLabel("Could not load financial tips. Please try again later.")
+            error_label.setStyleSheet("color: #dc3545; font-size: 14px;")
+            layout.addWidget(error_label)
 
     def show_budget(self):
         self.stack.setCurrentWidget(self.page_budget)
@@ -633,10 +639,10 @@ class UserDashboard(QMainWindow):
     def start_flask_thread(self):
         def run():
             try:
-                print("🚀 Starting Flask server in thread...")
+                print(" Starting Flask server in thread...")
                 self.run_flask_server()
             except Exception as e:
-                print("💥 Flask thread crashed:")
+                print("Flask thread crashed:")
                 traceback.print_exc()
 
         thread = threading.Thread(target=run, daemon=True)
