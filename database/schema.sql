@@ -9,9 +9,10 @@ CREATE TABLE IF NOT EXISTS users (
     last_login TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS settings (
+
+CREATE TABLE settings (
     setting_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL UNIQUE,  -- <-- this line matters!
     dark_mode BOOLEAN DEFAULT 0,
     currency TEXT DEFAULT 'USD',
     language TEXT DEFAULT 'en',
@@ -20,9 +21,9 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 CREATE TABLE IF NOT EXISTS accounts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+    id INTEGER PRIMARY KEY AUTOINCREMENT, -- new ID field
     user_id INTEGER NOT NULL,
-    account_id TEXT NOT NULL, 
+    account_id TEXT NOT NULL, -- plaid ID, now text
     account_type TEXT NOT NULL CHECK(account_type IN ('salary', 'savings')),
     bank_name TEXT,
     currency TEXT DEFAULT 'USD',
@@ -42,7 +43,6 @@ CREATE TABLE IF NOT EXISTS categories (
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
-
 CREATE TABLE IF NOT EXISTS transactions (
     transaction_id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     description TEXT,
     date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     is_recurring BOOLEAN DEFAULT 0,
-    recurrence_pattern TEXT,  
+    recurrence_pattern TEXT,  -- e.g., 'monthly', 'weekly'
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
     FOREIGN KEY (account_id) REFERENCES accounts(account_id),
     FOREIGN KEY (category_id) REFERENCES categories(category_id)
@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS ai_suggestions (
 
 CREATE TABLE IF NOT EXISTS system_logs (
     log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
+    user_id INTEGER,  -- nullable for system-level logs
     action TEXT NOT NULL,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     details TEXT,
