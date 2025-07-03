@@ -92,7 +92,7 @@ class SettingsWindow(QWidget):
             if currency_index >= 0:
                 self.currency.setCurrentIndex(currency_index)
 
-            lang_index = self.language.findText(s.get("language", "en"))
+            lang_index = self.language.findText(s["language"] if "language" in s.keys() else "en")
             if lang_index >= 0:
                 self.language.setCurrentIndex(lang_index)
 
