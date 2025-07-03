@@ -111,6 +111,39 @@ class SettingsWindow(QWidget):
             language = excluded.language,
             notifications_enabled = excluded.notifications_enabled
         '''
-        execute_query(q, (self.user_id, dark, curr, lang, notif), commit=True)
+        execute_query(q,(self.user_id,dark,curr,lang,notif),commit=True)
 
-        QMessageBox.information(self, "Settings Saved", "Your preferences have been updated successfully.")
+        # Apply dark/light theme
+        if dark:
+            self.apply_dark_theme()
+        else:
+            self.apply_light_theme()
+
+        # Update language of save button
+        self.save_btn.setText("Ayarları Kaydet" if lang == "tr" else "Save Settings")
+
+        # Refresh dashboard if possible
+        parent = self.parent()
+        if parent:
+            parent.refresh_dashboard()
+
+        QMessageBox.information(self,"Settings Saved","Your preferences have been updated successfully.")
+
+
+def apply_dark_theme(self):
+    self.setStyleSheet("""
+        QWidget {
+            background-color: #2e2e2e;
+            color: white;
+        }
+        QGroupBox {
+            border: 1px solid #444;
+            margin-top: 20px;
+        }
+        QLabel, QCheckBox, QComboBox {
+            font-size: 14px;
+        }
+    """)
+
+def apply_light_theme(self):
+    self.setStyleSheet("")  # Reset to default
