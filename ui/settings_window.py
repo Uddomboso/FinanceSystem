@@ -1,9 +1,10 @@
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QCheckBox, QComboBox,
-    QPushButton, QMessageBox, QGroupBox, QHBoxLayout
+    QPushButton, QMessageBox, QGroupBox
 )
 from PyQt5.QtGui import QFont
 from database.db_manager import fetch_one, execute_query
+
 
 class SettingsWindow(QWidget):
     def __init__(self, user_id):
@@ -71,7 +72,7 @@ class SettingsWindow(QWidget):
         """)
         self.save_btn.clicked.connect(self.save_settings)
 
-        # Add all to layout
+        # Assemble layout
         main_layout.addWidget(theme_box)
         main_layout.addWidget(currency_box)
         main_layout.addWidget(language_box)
@@ -82,8 +83,7 @@ class SettingsWindow(QWidget):
         self.setLayout(main_layout)
 
     def load_settings(self):
-        q = "SELECT * FROM settings WHERE user_id = ?"
-        s = fetch_one(q, (self.user_id,))
+        s = fetch_one("SELECT * FROM settings WHERE user_id = ?", (self.user_id,))
         if s:
             self.dark_mode.setChecked(bool(s["dark_mode"]))
             self.notif_box.setChecked(bool(s["notifications_enabled"]))
@@ -92,9 +92,16 @@ class SettingsWindow(QWidget):
             if currency_index >= 0:
                 self.currency.setCurrentIndex(currency_index)
 
-            lang_index = self.language.findText(s["language"] if "language" in s.keys() else "en")
+            lang_code = s.get("language", "en")
+            lang_index = self.language.findText(lang_code)
             if lang_index >= 0:
                 self.language.setCurrentIndex(lang_index)
+
+            # Apply theme on load
+            if s["dark_mode"]:
+                self.apply_dark_theme()
+            else:
+                self.apply_light_theme()
 
     def save_settings(self):
         dark = int(self.dark_mode.isChecked())
@@ -102,7 +109,7 @@ class SettingsWindow(QWidget):
         curr = self.currency.currentText()
         lang = self.language.currentText()
 
-        q = '''
+        query = '''
         INSERT INTO settings (user_id, dark_mode, currency, language, notifications_enabled)
         VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(user_id) DO UPDATE SET
@@ -111,39 +118,38 @@ class SettingsWindow(QWidget):
             language = excluded.language,
             notifications_enabled = excluded.notifications_enabled
         '''
-        execute_query(q,(self.user_id,dark,curr,lang,notif),commit=True)
+        execute_query(query, (self.user_id, dark, curr, lang, notif), commit=True)
 
-        # Apply dark/light theme
+        # Apply theme instantly
         if dark:
             self.apply_dark_theme()
         else:
             self.apply_light_theme()
 
-        # Update language of save button
+        # Language switch (for this window only)
         self.save_btn.setText("Ayarları Kaydet" if lang == "tr" else "Save Settings")
 
-        # Refresh dashboard if possible
+        # Refresh dashboard if parent exists
         parent = self.parent()
-        if parent:
+        if parent and hasattr(parent, "refresh_dashboard"):
             parent.refresh_dashboard()
 
-        QMessageBox.information(self,"Settings Saved","Your preferences have been updated successfully.")
+        QMessageBox.information(self, "Settings Saved", "Your preferences have been updated successfully.")
 
+    def apply_dark_theme(self):
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #2e2e2e;
+                color: white;
+            }
+            QGroupBox {
+                border: 1px solid #444;
+                margin-top: 20px;
+            }
+            QLabel, QCheckBox, QComboBox {
+                font-size: 14px;
+            }
+        """)
 
-def apply_dark_theme(self):
-    self.setStyleSheet("""
-        QWidget {
-            background-color: #2e2e2e;
-            color: white;
-        }
-        QGroupBox {
-            border: 1px solid #444;
-            margin-top: 20px;
-        }
-        QLabel, QCheckBox, QComboBox {
-            font-size: 14px;
-        }
-    """)
-
-def apply_light_theme(self):
-    self.setStyleSheet("")  # Reset to default
+    def apply_light_theme(self):
+        self.setStyleSheet("")
