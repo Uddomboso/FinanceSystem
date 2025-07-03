@@ -7,8 +7,8 @@ from database.db_manager import fetch_one, execute_query
 
 
 class SettingsWindow(QWidget):
-    def __init__(self, user_id):
-        super().__init__()
+    def __init__(self, user_id, parent=None):
+        super().__init__(parent)
         self.user_id = user_id
         self.setWindowTitle("Settings")
         self.setMinimumSize(400, 300)
@@ -49,7 +49,7 @@ class SettingsWindow(QWidget):
         # Language Section
         language_box = QGroupBox("Language")
         language_layout = QVBoxLayout()
-        self.language.addItems(["en", "tr"])
+        self.language.addItems(["English", "Türkçe"])
         self.language.setFont(label_font)
         language_layout.addWidget(self.language)
         language_box.setLayout(language_layout)
@@ -85,29 +85,29 @@ class SettingsWindow(QWidget):
     def load_settings(self):
         s = fetch_one("SELECT * FROM settings WHERE user_id = ?", (self.user_id,))
         if s:
-            self.dark_mode.setChecked(bool(s["dark_mode"]))
-            self.notif_box.setChecked(bool(s["notifications_enabled"]))
+            self.dark_mode.setChecked(bool(s.get("dark_mode", False)))
+            self.notif_box.setChecked(bool(s.get("notifications_enabled", False)))
 
-            currency_index = self.currency.findText(s["currency"])
+            currency = s.get("currency", "USD")
+            currency_index = self.currency.findText(currency)
             if currency_index >= 0:
                 self.currency.setCurrentIndex(currency_index)
 
-            lang_code = s["language"] if "language" in s.keys() else "en"
-            lang_index = self.language.findText(lang_code)
+            lang_code = s.get("language", "en")
+            lang_display = "English" if lang_code == "en" else "Türkçe"
+            lang_index = self.language.findText(lang_display)
             if lang_index >= 0:
                 self.language.setCurrentIndex(lang_index)
 
             # Apply theme on load
-            if s["dark_mode"]:
-                self.apply_dark_theme()
-            else:
-                self.apply_light_theme()
+            self.apply_theme(self.dark_mode.isChecked())
 
     def save_settings(self):
         dark = int(self.dark_mode.isChecked())
         notif = int(self.notif_box.isChecked())
         curr = self.currency.currentText()
-        lang = self.language.currentText()
+        lang_display = self.language.currentText()
+        lang_code = "en" if lang_display == "English" else "tr"
 
         query = '''
         INSERT INTO settings (user_id, dark_mode, currency, language, notifications_enabled)
@@ -118,30 +118,113 @@ class SettingsWindow(QWidget):
             language = excluded.language,
             notifications_enabled = excluded.notifications_enabled
         '''
-        execute_query(query, (self.user_id, dark, curr, lang, notif), commit=True)
+        execute_query(query, (self.user_id, dark, curr, lang_code, notif), commit=True)
 
         # Apply theme instantly
-        if dark:
-            self.apply_dark_theme()
-        else:
-            self.apply_light_theme()
+        self.apply_theme(dark)
 
-        # Language switch (for this window only)
-        self.save_btn.setText("Ayarları Kaydet" if lang == "tr" else "Save Settings")
+        # Update button text based on language
+        self.save_btn.setText("Ayarları Kaydet" if lang_code == "tr" else "Save Settings")
 
-        # Refresh dashboard if parent exists
+        # Show confirmation message
+        msg = "Ayarlar kaydedildi!" if lang_code == "tr" else "Settings saved successfully!"
+        QMessageBox.information(self, "Success", msg)
+
+        # Notify parent to update theme globally
         parent = self.parent()
+        if parent and hasattr(parent, "apply_global_theme"):
+            parent.apply_global_theme(dark)
         if parent and hasattr(parent, "refresh_dashboard"):
             parent.refresh_dashboard()
 
-        QMessageBox.information(self, "Settings Saved", "Your preferences have been updated successfully.")
+    def apply_theme(self, dark):
+        """Apply theme to this window only"""
+        stylesheet = DARK_QSS if dark else LIGHT_QSS
+        self.setStyleSheet(stylesheet)
 
-    def apply_dark_theme(self):
-        parent = self.parent()
-        if parent:
-            parent.setStyleSheet(DARK_QSS)
 
-    def apply_light_theme(self):
-        parent = self.parent()
-        if parent:
-            parent.setStyleSheet(LIGHT_QSS)
+DARK_QSS = """
+    QWidget {
+        background-color: #2c2c2c;
+        color: #ffffff;
+    }
+    QGroupBox {
+        border: 1px solid #444;
+        border-radius: 8px;
+        margin-top: 10px;
+        background-color: #333;
+        padding: 10px;
+    }
+    QGroupBox::title {
+        subcontrol-origin: margin;
+        subcontrol-position: top left;
+        padding: 0 5px;
+        font-weight: bold;
+    }
+    QComboBox {
+        background-color: #444;
+        color: #fff;
+        border: 1px solid #666;
+        padding: 4px;
+        border-radius: 4px;
+    }
+    QCheckBox {
+        spacing: 8px;
+    }
+    QCheckBox::indicator {
+        width: 16px;
+        height: 16px;
+    }
+    QPushButton {
+        background-color: #d6733a;
+        color: white;
+        padding: 10px;
+        border-radius: 6px;
+    }
+    QPushButton:hover {
+        background-color: #b45131;
+    }
+"""
+
+LIGHT_QSS = """
+    QWidget {
+        background-color: #f3f3f3;
+        color: #000;
+    }
+    QGroupBox {
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        margin-top: 10px;
+        background-color: #fff;
+        padding: 10px;
+    }
+    QGroupBox::title {
+        subcontrol-origin: margin;
+        subcontrol-position: top left;
+        padding: 0 5px;
+        font-weight: bold;
+    }
+    QComboBox {
+        background-color: #fff;
+        color: #000;
+        border: 1px solid #aaa;
+        padding: 4px;
+        border-radius: 4px;
+    }
+    QCheckBox {
+        spacing: 8px;
+    }
+    QCheckBox::indicator {
+        width: 16px;
+        height: 16px;
+    }
+    QPushButton {
+        background-color: #d6733a;
+        color: white;
+        padding: 10px;
+        border-radius: 6px;
+    }
+    QPushButton:hover {
+        background-color: #b45131;
+    }
+"""
