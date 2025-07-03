@@ -137,87 +137,11 @@ class SettingsWindow(QWidget):
         QMessageBox.information(self, "Settings Saved", "Your preferences have been updated successfully.")
 
     def apply_dark_theme(self):
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #2c2c2c;
-                color: #ffffff;
-            }
-            QGroupBox {
-                border: 1px solid #444;
-                border-radius: 8px;
-                margin-top: 10px;
-                background-color: #333;
-                padding: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 5px;
-                font-weight: bold;
-            }
-            QCheckBox, QComboBox, QLabel {
-                font-size: 14px;
-            }
-            QComboBox {
-                background-color: #444;
-                color: #fff;
-                border: 1px solid #666;
-                padding: 4px;
-                border-radius: 4px;
-            }
-            QCheckBox {
-                spacing: 8px;
-            }
-            QPushButton {
-                background-color: #d6733a;
-                color: white;
-                padding: 10px;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #b45131;
-            }
-        """)
+        parent = self.parent()
+        if parent:
+            parent.setStyleSheet(DARK_QSS)
 
     def apply_light_theme(self):
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #f3f3f3;
-                color: #000;
-            }
-            QGroupBox {
-                border: 1px solid #ccc;
-                border-radius: 8px;
-                margin-top: 10px;
-                background-color: #fff;
-                padding: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 5px;
-                font-weight: bold;
-            }
-            QCheckBox, QComboBox, QLabel {
-                font-size: 14px;
-            }
-            QComboBox {
-                background-color: #fff;
-                color: #000;
-                border: 1px solid #aaa;
-                padding: 4px;
-                border-radius: 4px;
-            }
-            QCheckBox {
-                spacing: 8px;
-            }
-            QPushButton {
-                background-color: #d6733a;
-                color: white;
-                padding: 10px;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #b45131;
-            }
-        """)
+        parent = self.parent()
+        if parent:
+            parent.setStyleSheet(LIGHT_QSS)
