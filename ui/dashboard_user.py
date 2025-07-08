@@ -1,70 +1,39 @@
 from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QStackedWidget, QFrame, QComboBox, QSizePolicy, QScrollArea
+    QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QPushButton,QLabel,
+    QStackedWidget,QFrame,QComboBox,QSizePolicy,QScrollArea,QApplication
 )
-from PyQt5.QtGui import QPixmap, QFont, QIcon
-from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtGui import QPixmap,QFont,QIcon
+from PyQt5.QtCore import Qt,QSize
 import qtawesome as qta
-from datetime import datetime, timedelta
+from datetime import datetime,timedelta
 import webbrowser
-from flask import Flask, request
+from flask import Flask,request
 import threading
 import os
 import traceback
 
-from core.ai_suggestions import get_recent_suggestions, generate_suggestions
+from core.ai_suggestions import get_recent_suggestions,generate_suggestions
 from ui.transaction_form import TransactionForm
 from ui.budget_window import BudgetWindow
 from ui.charts_window import ChartsWindow
-from ui.settings_window import SettingsWindow
-from core.ai_suggestions import get_recent_suggestions
+from ui.settings_window import SettingsWindow,DARK_QSS,LIGHT_QSS
 from ui.bank_connect_window import BankConnectWindow
-from database.db_manager import fetch_all, fetch_one, execute_query
-from core.transactions import get_total_by_type, insert_plaid_transaction
-from core.currency import convert
-from PyQt5.QtWidgets import QApplication
-from ui.settings_window import DARK_QSS, LIGHT_QSS
-from core.plaid_api import create_link_token, exchange_public_token, get_accounts, get_transactions
-
-
-from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QStackedWidget, QFrame, QComboBox, QSizePolicy, QScrollArea, QApplication
-)
-from PyQt5.QtGui import QPixmap, QFont, QIcon
-from PyQt5.QtCore import Qt, QSize
-import qtawesome as qta
-from datetime import datetime, timedelta
-import webbrowser
-from flask import Flask, request
-import threading
-import os
-import traceback
-
-from core.ai_suggestions import get_recent_suggestions, generate_suggestions
-from ui.transaction_form import TransactionForm
-from ui.budget_window import BudgetWindow
-from ui.charts_window import ChartsWindow
-from ui.settings_window import SettingsWindow, DARK_QSS, LIGHT_QSS
-from ui.bank_connect_window import BankConnectWindow
-from database.db_manager import fetch_all, fetch_one, execute_query
-from core.transactions import get_total_by_type, insert_plaid_transaction
+from database.db_manager import fetch_all,fetch_one,execute_query
+from core.transactions import get_total_by_type,insert_plaid_transaction
 from core.currency import convert
 from ui.commitment_form import CommitmentForm
-from core.plaid_api import create_link_token, exchange_public_token, get_accounts, get_transactions
-from core.commitment_manager import check_commitments
-
-
+from ui.recent_transfers_widget import RecentTransfersWidget
+from core.plaid_api import create_link_token,exchange_public_token,get_accounts,get_transactions
 
 
 class UserDashboard(QMainWindow):
-    def __init__(self, username, user_id):
+    def __init__(self,username,user_id):
         super().__init__()
         self.username = username
         self.user_id = user_id
 
         self.setWindowTitle("PennyWise")
-        self.setMinimumSize(1440, 900)
+        self.setMinimumSize(1440,900)
 
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
@@ -77,12 +46,14 @@ class UserDashboard(QMainWindow):
         generate_suggestions(self.user_id)
         self.show_dashboard()
 
+        self.recent_transfers = RecentTransfersWidget(self.user_id)
+        self.main_layout.addWidget(self.recent_transfers)
+
         self.start_flask_thread()
 
     def is_dark_mode(self):
-        result = fetch_one("SELECT dark_mode FROM settings WHERE user_id = ?", (self.user_id,))
+        result = fetch_one("SELECT dark_mode FROM settings WHERE user_id = ?",(self.user_id,))
         return result and result["dark_mode"]
-
 
     def run_flask_server(self):
         app = Flask(__name__)
@@ -136,7 +107,6 @@ class UserDashboard(QMainWindow):
                 traceback.print_exc()
                 return f"<h2>❌ Error:</h2><pre>{e}</pre>",500
 
-
         app.run(port=5000)
 
     def launch_plaid_in_browser(self):
@@ -176,8 +146,6 @@ class UserDashboard(QMainWindow):
         sidebar.setSpacing(20)
         sidebar.setContentsMargins(0,20,0,20)
 
-
-        # Logo
         logo = QLabel()
         logo_path = "logopng.png" if self.is_dark_mode() else "logopng.png"
         pixmap = QPixmap(logo_path)
@@ -186,8 +154,6 @@ class UserDashboard(QMainWindow):
         logo.setAlignment(Qt.AlignCenter)
         sidebar.addWidget(logo)
 
-
-        # Navigation buttons
         nav_items = [
             ("Dashboard","fa5s.tachometer-alt",self.show_dashboard),
             ("Transactions","fa5s.exchange-alt",self.show_transactions),
@@ -222,7 +188,6 @@ class UserDashboard(QMainWindow):
         sidebar_widget.setStyleSheet(f"background-color: {sidebar_bg};")
         self.main_layout.addWidget(sidebar_widget)
 
-
     def apply_global_theme(self,dark_mode):
         print("🌙 Applying global theme:","dark" if dark_mode else "light")
         stylesheet = DARK_QSS if dark_mode else LIGHT_QSS
@@ -253,23 +218,17 @@ class UserDashboard(QMainWindow):
         self.highlight_nav("Link Bank")
         self.launch_plaid_link()
 
-    # [Rest of your existing methods remain unchanged...]
-    # build_dashboard, update_financial_overview, create_finance_card, etc.
-    # All other methods should stay exactly as they were in your original code
-
-
     def build_dashboard(self):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
 
         container = QWidget()
         layout = QVBoxLayout()
-        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setContentsMargins(30,30,30,30)
         layout.setSpacing(30)
 
-        # Header
         header = QLabel(f"Welcome back, {self.username}!")
-        header.setFont(QFont("Segoe UI", 32))
+        header.setFont(QFont("Segoe UI",32))
         header.setStyleSheet("color: #d6733a;")
         layout.addWidget(header)
 
@@ -278,7 +237,6 @@ class UserDashboard(QMainWindow):
             background-color: transparent;
         """)
 
-        # Bank Accounts Section
         accounts = fetch_all("""
             SELECT a.account_id, a.bank_name, a.account_type,
                    COALESCE(
@@ -287,7 +245,7 @@ class UserDashboard(QMainWindow):
                         WHERE t.account_id = a.account_id), 0) as balance
             FROM accounts a
             WHERE a.user_id = ?
-        """, (self.user_id,))
+        """,(self.user_id,))
 
         if accounts:
             accounts_section = QFrame()
@@ -312,13 +270,11 @@ class UserDashboard(QMainWindow):
                 """)
                 account_layout = QHBoxLayout(account_widget)
 
-                # Bank icon
-                icon = qta.icon("fa5s.university", color="#704b3b")
+                icon = qta.icon("fa5s.university",color="#704b3b")
                 icon_label = QLabel()
-                icon_label.setPixmap(icon.pixmap(24, 24))
+                icon_label.setPixmap(icon.pixmap(24,24))
                 account_layout.addWidget(icon_label)
 
-                # Account details
                 details = QVBoxLayout()
                 name_label = QLabel(account["bank_name"])
                 name_label.setStyleSheet("font-weight: bold;")
@@ -328,7 +284,6 @@ class UserDashboard(QMainWindow):
                 details.addWidget(type_label)
                 account_layout.addLayout(details)
 
-                # Balance
                 balance = account["balance"] or 0
                 balance_label = QLabel(f"${balance:,.2f}")
                 balance_label.setStyleSheet("""
@@ -340,11 +295,10 @@ class UserDashboard(QMainWindow):
 
                 accounts_layout.addWidget(account_widget)
 
-        # Financial Overview
         self.update_financial_overview(layout)
 
         self.add_ai_tips(layout)
-        # Recent Activity
+
         self.add_recent_activity(layout)
 
         container.setLayout(layout)
@@ -352,7 +306,7 @@ class UserDashboard(QMainWindow):
         return scroll
 
     def calculate_account_balance(self,account_id):
-        # Get all transactions for this account
+
         transactions = fetch_all("""
                 SELECT amount, transaction_type 
                 FROM transactions 
@@ -377,13 +331,11 @@ class UserDashboard(QMainWindow):
             """)
         layout = QHBoxLayout(widget)
 
-        # Bank icon and name
         icon = qta.icon("fa5s.university",color="#704b3b")
         icon_label = QLabel()
         icon_label.setPixmap(icon.pixmap(24,24))
         layout.addWidget(icon_label)
 
-        # Account details
         details = QVBoxLayout()
         details.setSpacing(5)
 
@@ -397,7 +349,6 @@ class UserDashboard(QMainWindow):
         details.addWidget(type_label)
         layout.addLayout(details)
 
-        # Balance
         balance_label = QLabel(f"${balance:,.2f}")
         balance_label.setStyleSheet("""
                 font-size: 18px; 
@@ -407,24 +358,21 @@ class UserDashboard(QMainWindow):
         layout.addWidget(balance_label)
 
         return widget
+
     def update_financial_overview(self,layout):
-        # Get financial data
         totals = get_total_by_type(self.user_id)
         income = next((t["total"] for t in totals if t["transaction_type"] == "income"),0)
         expense = next((t["total"] for t in totals if t["transaction_type"] == "expense"),0)
         balance = income - expense
 
-        # Get user currency
         user_currency = fetch_one("SELECT currency FROM settings WHERE user_id = ?",(self.user_id,))
         currency = user_currency["currency"] if user_currency else "USD"
 
-        # Convert amounts if needed
         if currency != "USD":
             income = convert(income,"USD",currency) or income
             expense = convert(expense,"USD",currency) or expense
             balance = convert(balance,"USD",currency) or balance
 
-        # Overview section
         overview_frame = QFrame()
         overview_frame.setStyleSheet(f"""
             background-color: {'#1e1e1e' if self.is_dark_mode() else 'white'};
@@ -434,14 +382,12 @@ class UserDashboard(QMainWindow):
 
         overview_layout = QHBoxLayout(overview_frame)
 
-        # Balance card
         balance_card = self.create_finance_card(
             "Total Balance",
             f"{currency} {balance:,.2f}",
             "#4CAF50" if balance >= 0 else "#F44336"
         )
 
-        # Income card
         income_card = self.create_finance_card(
             "Total Income",
             f"{currency} {income:,.2f}",
@@ -488,7 +434,6 @@ class UserDashboard(QMainWindow):
         return card
 
     def add_recent_activity(self,layout):
-        # Get recent transactions
         transactions = fetch_all("""
             SELECT t.*, c.category_name, a.bank_name 
             FROM transactions t
@@ -533,7 +478,6 @@ class UserDashboard(QMainWindow):
 
         layout = QHBoxLayout(widget)
 
-        # Transaction icon
         icon = qta.icon(
             "fa5s.arrow-up" if txn["transaction_type"] == "expense" else "fa5s.arrow-down",
             color="#dc3545" if txn["transaction_type"] == "expense" else "#28a745"
@@ -542,7 +486,6 @@ class UserDashboard(QMainWindow):
         icon_label.setPixmap(icon.pixmap(24,24))
         layout.addWidget(icon_label)
 
-        # Transaction details
         details = QVBoxLayout()
         details.setSpacing(5)
 
@@ -556,7 +499,6 @@ class UserDashboard(QMainWindow):
         details.addWidget(meta)
         layout.addLayout(details)
 
-        # Amount and date
         right = QVBoxLayout()
         right.setSpacing(5)
         right.setAlignment(Qt.AlignRight)
@@ -577,13 +519,11 @@ class UserDashboard(QMainWindow):
         return widget
 
     def update_dashboard(self):
-        """Refresh dashboard data"""
         self.page_dashboard = self.build_dashboard()
         self.stack.removeWidget(self.stack.widget(0))
         self.stack.insertWidget(0,self.page_dashboard)
         self.stack.setCurrentIndex(0)
 
-    # Navigation methods remain the same as before
     def highlight_nav(self,active_text):
         for text,btn in self.nav_buttons.items():
             if text == active_text:
@@ -623,17 +563,18 @@ class UserDashboard(QMainWindow):
     def show_dashboard(self):
         self.stack.setCurrentWidget(self.page_dashboard)
         self.highlight_nav("Dashboard")
+        check_commitments(self.user_id)
 
     def show_transactions(self):
         self.stack.setCurrentWidget(self.page_transactions)
         self.highlight_nav("Transactions")
 
     def add_ai_tips(self,layout):
-        print("🧠 Fetching AI tips for user:",self.user_id)
+        print("Fetching AI tips for user:",self.user_id)
 
         try:
             tips = get_recent_suggestions(self.user_id)
-            print(f"✅ Found {len(tips)} tips")
+            print(f"Found {len(tips)} tips")
 
             if not tips:
                 no_tips = QLabel("No financial tips available yet.")
@@ -659,7 +600,7 @@ class UserDashboard(QMainWindow):
                 layout.addWidget(tip_label)
 
         except Exception as e:
-            print(f"❌ Error displaying tips: {e}")
+            print(f"Error displaying tips: {e}")
             error_label = QLabel("Could not load financial tips. Please try again later.")
             error_label.setStyleSheet("color: #dc3545; font-size: 14px;")
             layout.addWidget(error_label)
@@ -692,17 +633,16 @@ class UserDashboard(QMainWindow):
         self.stack.insertWidget(0,self.page_dashboard)
         self.stack.setCurrentWidget(self.page_dashboard)
 
-
     def start_flask_thread(self):
         def run():
             try:
-                print("🚀 Starting Flask server in thread...")
+                print(" Starting Flask server in thread...")
                 self.run_flask_server()
             except Exception as e:
-                print("💥 Flask thread crashed:")
+                print("Flask thread crashed:")
                 traceback.print_exc()
 
-        thread = threading.Thread(target=run, daemon=True)
+        thread = threading.Thread(target=run,daemon=True)
         thread.start()
 
     def is_dark_mode(self):
@@ -712,3 +652,63 @@ class UserDashboard(QMainWindow):
     def show_commitment_form(self):
         self.commitment_form = CommitmentForm(self.user_id)
         self.commitment_form.show()
+
+
+from PyQt5.QtWidgets import (
+    QWidget,QLabel,QVBoxLayout,QHBoxLayout,QScrollArea,QSizePolicy
+)
+from PyQt5.QtCore import Qt
+from core.transfer import get_recent_category_transfers
+
+
+class RecentTransfersWidget(QWidget):
+    def __init__(self,user_id):
+        super().__init__()
+        self.user_id = user_id
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout()
+        title = QLabel("Recent Commitment Payments")
+        title.setStyleSheet("font-weight: bold; font-size: 16px;")
+        layout.addWidget(title)
+
+        transfers = get_recent_category_transfers(self.user_id)
+
+        if not transfers:
+            layout.addWidget(QLabel("No recent commitment payments."))
+        else:
+            scroll = QScrollArea()
+            container = QWidget()
+            container_layout = QVBoxLayout()
+            container.setLayout(container_layout)
+
+            for t in transfers:
+                row = QHBoxLayout()
+                row.addWidget(QLabel(f"{t['category_name']}"))
+                row.addWidget(QLabel(f"${t['amount']:.2f}"))
+                row.addWidget(QLabel(t['transfer_date'].split(" ")[0]))
+                if t['note']:
+                    row.addWidget(QLabel(t['note']))
+                container_layout.addLayout(row)
+
+            scroll.setWidget(container)
+            scroll.setWidgetResizable(True)
+            scroll.setFixedHeight(150)
+            layout.addWidget(scroll)
+
+        self.setLayout(layout)
+
+        for t in transfers:
+            row_widget = QFrame()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(5,5,5,5)  # add padding
+
+            row_layout.addWidget(QLabel(f"{t['category_name']}"))
+            row_layout.addWidget(QLabel(f"${t['amount']:.2f}"))
+            row_layout.addWidget(QLabel(t['transfer_date'].split(" ")[0]))
+            if t['note']:
+                row_layout.addWidget(QLabel(t['note']))
+
+            container_layout.addWidget(row_widget)
+
