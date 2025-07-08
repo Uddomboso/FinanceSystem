@@ -52,6 +52,10 @@ from core.transactions import get_total_by_type, insert_plaid_transaction
 from core.currency import convert
 from ui.commitment_form import CommitmentForm
 from core.plaid_api import create_link_token, exchange_public_token, get_accounts, get_transactions
+from core.commitment_manager import check_commitments
+
+
+
 
 class UserDashboard(QMainWindow):
     def __init__(self, username, user_id):
