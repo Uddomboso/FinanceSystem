@@ -1,4 +1,4 @@
-
+-- USERS TABLE
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT NOT NULL UNIQUE,
@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
     last_login TIMESTAMP
 );
 
+-- SETTINGS TABLE
 
 CREATE TABLE settings (
     setting_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -20,6 +21,8 @@ CREATE TABLE settings (
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
+
+-- ACCOUNTS TABLE (salary / savings / plaid)
 CREATE TABLE IF NOT EXISTS accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT, -- new ID field
     user_id INTEGER NOT NULL,
@@ -33,6 +36,8 @@ CREATE TABLE IF NOT EXISTS accounts (
 );
 
 
+
+-- CATEGORIES TABLE
 CREATE TABLE IF NOT EXISTS categories (
     category_id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -43,6 +48,7 @@ CREATE TABLE IF NOT EXISTS categories (
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
+-- TRANSACTIONS TABLE
 CREATE TABLE IF NOT EXISTS transactions (
     transaction_id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -59,6 +65,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     FOREIGN KEY (category_id) REFERENCES categories(category_id)
 );
 
+-- AI SUGGESTIONS TABLE
 CREATE TABLE IF NOT EXISTS ai_suggestions (
     suggestion_id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -68,6 +75,7 @@ CREATE TABLE IF NOT EXISTS ai_suggestions (
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
+-- SYSTEM LOGS TABLE
 CREATE TABLE IF NOT EXISTS system_logs (
     log_id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,  -- nullable for system-level logs
@@ -75,4 +83,48 @@ CREATE TABLE IF NOT EXISTS system_logs (
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     details TEXT,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS salary_expectations (
+    salary_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    expected_amount REAL,
+    expected_day INTEGER DEFAULT 1 CHECK(expected_day BETWEEN 1 AND 31),
+    account_id INTEGER, -- specify which account
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id)
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    notification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    notification_type TEXT CHECK(notification_type IN ('salary', 'reminder', 'overdue', 'payment')),
+    is_sent BOOLEAN DEFAULT 0,
+    send_date DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS virtual_accounts (
+    virtual_account_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    category_id INTEGER NOT NULL,
+    balance REAL DEFAULT 0.0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (category_id) REFERENCES categories(category_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS category_commitments (
+    commitment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    category_id INTEGER NOT NULL,
+    amount REAL NOT NULL,
+    due_day INTEGER NOT NULL CHECK(due_day BETWEEN 1 AND 31), -- Day of the month
+    is_paid BOOLEAN DEFAULT 0,
+    last_paid_date TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (category_id) REFERENCES categories(category_id) ON DELETE CASCADE
 );
