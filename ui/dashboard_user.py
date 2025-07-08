@@ -174,7 +174,7 @@ class UserDashboard(QMainWindow):
 
         # Logo
         logo = QLabel()
-        logo_path = "logodark.png" if self.is_dark_mode() else "logopng.png"
+        logo_path = "logopng.png" if self.is_dark_mode() else "logopng.png"
         pixmap = QPixmap(logo_path)
         pixmap = pixmap.scaled(150,150,Qt.KeepAspectRatio,Qt.SmoothTransformation)
         logo.setPixmap(pixmap)
@@ -267,6 +267,11 @@ class UserDashboard(QMainWindow):
         header.setFont(QFont("Segoe UI", 32))
         header.setStyleSheet("color: #d6733a;")
         layout.addWidget(header)
+
+        header.setStyleSheet(f"""
+            color: #d6733a;
+            background-color: transparent;
+        """)
 
         # Bank Accounts Section
         accounts = fetch_all("""
@@ -416,11 +421,12 @@ class UserDashboard(QMainWindow):
 
         # Overview section
         overview_frame = QFrame()
-        overview_frame.setStyleSheet("""
-            background-color: white;
+        overview_frame.setStyleSheet(f"""
+            background-color: {'#1e1e1e' if self.is_dark_mode() else 'white'};
             border-radius: 10px;
             padding: 20px;
         """)
+
         overview_layout = QHBoxLayout(overview_frame)
 
         # Balance card
@@ -489,12 +495,12 @@ class UserDashboard(QMainWindow):
         """,(self.user_id,))
 
         activity_frame = QFrame()
-        activity_frame.setStyleSheet("""
+        activity_frame.setStyleSheet(f"""
             background-color: {'#1e1e1e' if self.is_dark_mode() else 'white'};
             border-radius: 10px;
             padding: 20px;
-             border: none;
-            color:  {'#FFFDD0' if self.is_dark_mode() else '#333'};
+            border: none;
+            color: {'#FFFDD0' if self.is_dark_mode() else '#333'};
         """)
         activity_layout = QVBoxLayout(activity_frame)
 
@@ -515,10 +521,11 @@ class UserDashboard(QMainWindow):
 
     def create_transaction_widget(self,txn):
         widget = QFrame()
-        widget.setStyleSheet("""
-            border-bottom: 1px solid #e9ecef;
+        widget.setStyleSheet(f"""
+            border-bottom: {'1px solid #e9ecef' if not self.is_dark_mode() else 'none'};
             padding: 10px 0;
         """)
+
         layout = QHBoxLayout(widget)
 
         # Transaction icon
