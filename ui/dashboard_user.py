@@ -22,7 +22,8 @@ from database.db_manager import fetch_all,fetch_one,execute_query
 from core.transactions import get_total_by_type,insert_plaid_transaction
 from core.currency import convert
 from ui.commitment_form import CommitmentForm
-from ui.recent_transfers_widget import RecentTransfersWidget
+from core.salary_checker import check_salary_reminder
+from core.commitment_manager import check_commitments
 from core.plaid_api import create_link_token,exchange_public_token,get_accounts,get_transactions
 
 
@@ -564,6 +565,7 @@ class UserDashboard(QMainWindow):
         self.stack.setCurrentWidget(self.page_dashboard)
         self.highlight_nav("Dashboard")
         check_commitments(self.user_id)
+        check_salary_reminder(self.user_id)
 
     def show_transactions(self):
         self.stack.setCurrentWidget(self.page_transactions)
