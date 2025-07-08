@@ -22,6 +22,34 @@ from ui.bank_connect_window import BankConnectWindow
 from database.db_manager import fetch_all, fetch_one, execute_query
 from core.transactions import get_total_by_type, insert_plaid_transaction
 from core.currency import convert
+from PyQt5.QtWidgets import QApplication
+from ui.settings_window import DARK_QSS, LIGHT_QSS
+from core.plaid_api import create_link_token, exchange_public_token, get_accounts, get_transactions
+
+
+from PyQt5.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QStackedWidget, QFrame, QComboBox, QSizePolicy, QScrollArea, QApplication
+)
+from PyQt5.QtGui import QPixmap, QFont, QIcon
+from PyQt5.QtCore import Qt, QSize
+import qtawesome as qta
+from datetime import datetime, timedelta
+import webbrowser
+from flask import Flask, request
+import threading
+import os
+import traceback
+
+from core.ai_suggestions import get_recent_suggestions, generate_suggestions
+from ui.transaction_form import TransactionForm
+from ui.budget_window import BudgetWindow
+from ui.charts_window import ChartsWindow
+from ui.settings_window import SettingsWindow, DARK_QSS, LIGHT_QSS
+from ui.bank_connect_window import BankConnectWindow
+from database.db_manager import fetch_all, fetch_one, execute_query
+from core.transactions import get_total_by_type, insert_plaid_transaction
+from core.currency import convert
 from core.plaid_api import create_link_token, exchange_public_token, get_accounts, get_transactions
 
 class UserDashboard(QMainWindow):
@@ -46,6 +74,11 @@ class UserDashboard(QMainWindow):
 
         self.start_flask_thread()
 
+    def is_dark_mode(self):
+        result = fetch_one("SELECT dark_mode FROM settings WHERE user_id = ?", (self.user_id,))
+        return result and result["dark_mode"]
+
+
     def run_flask_server(self):
         app = Flask(__name__)
         dashboard_ref = self
@@ -53,18 +86,18 @@ class UserDashboard(QMainWindow):
         @app.route("/success")
         def plaid_success():
             try:
-                print("Callback received")
+                print("✅ Callback received")
                 public_token = request.args.get("token")
-                print("Public token received:",public_token)
+                print("🔑 Public token received:",public_token)
 
                 if public_token:
                     data = exchange_public_token(public_token)
-                    print(" Exchange response:",data)
+                    print("🎯 Exchange response:",data)
 
                     access_token = data.get("access_token")
                     if access_token:
                         accounts = get_accounts(access_token)
-                        print("Retrieved accounts:",accounts)
+                        print("✅ Retrieved accounts:",accounts)
 
                         for acc in accounts.get("accounts",[]):
                             account_type = "salary" if "checking" in acc.get("subtype","").lower() else "savings"
@@ -92,11 +125,11 @@ class UserDashboard(QMainWindow):
 
                         dashboard_ref.refresh_dashboard()
 
-                return "<h2> Success! You can now close this tab.</h2>"
+                return "<h2>✅ Success! You can now close this tab.</h2>"
 
             except Exception as e:
                 traceback.print_exc()
-                return f"<h2> Error:</h2><pre>{e}</pre>",500
+                return f"<h2>❌ Error:</h2><pre>{e}</pre>",500
 
 
         app.run(port=5000)
@@ -138,13 +171,16 @@ class UserDashboard(QMainWindow):
         sidebar.setSpacing(20)
         sidebar.setContentsMargins(0,20,0,20)
 
+
         # Logo
         logo = QLabel()
-        pixmap = QPixmap("logopng.png")
+        logo_path = "logodark.png" if self.is_dark_mode() else "logopng.png"
+        pixmap = QPixmap(logo_path)
         pixmap = pixmap.scaled(150,150,Qt.KeepAspectRatio,Qt.SmoothTransformation)
         logo.setPixmap(pixmap)
         logo.setAlignment(Qt.AlignCenter)
         sidebar.addWidget(logo)
+
 
         # Navigation buttons
         nav_items = [
@@ -169,7 +205,6 @@ class UserDashboard(QMainWindow):
 
         sidebar.addStretch()
 
-        # User info
         user_label = QLabel(f"Logged in as:\n{self.username}")
         user_label.setAlignment(Qt.AlignCenter)
         user_label.setStyleSheet("color: white; font-size: 12px;")
@@ -178,8 +213,15 @@ class UserDashboard(QMainWindow):
         sidebar_widget = QWidget()
         sidebar_widget.setLayout(sidebar)
         sidebar_widget.setFixedWidth(240)
-        sidebar_widget.setStyleSheet("background-color: #d6733a;")
+        sidebar_bg = "#111111" if self.is_dark_mode() else "#d6733a"
+        sidebar_widget.setStyleSheet(f"background-color: {sidebar_bg};")
         self.main_layout.addWidget(sidebar_widget)
+
+
+    def apply_global_theme(self,dark_mode):
+        print("🌙 Applying global theme:","dark" if dark_mode else "light")
+        stylesheet = DARK_QSS if dark_mode else LIGHT_QSS
+        QApplication.instance().setStyleSheet(stylesheet)
 
     def init_pages(self):
         self.stack = QStackedWidget()
@@ -188,8 +230,8 @@ class UserDashboard(QMainWindow):
         self.page_transactions = TransactionForm(self.user_id)
         self.page_budget = BudgetWindow(self.user_id)
         self.page_reports = ChartsWindow(self.user_id)
-        self.page_settings = SettingsWindow(self.user_id)
         self.page_bank = BankConnectWindow(self.user_id,self)  # Pass self as parent
+        self.page_settings = SettingsWindow(self.user_id,parent=self)
 
         self.stack.addWidget(self.page_dashboard)
         self.stack.addWidget(self.page_transactions)
@@ -573,11 +615,11 @@ class UserDashboard(QMainWindow):
         self.highlight_nav("Transactions")
 
     def add_ai_tips(self,layout):
-        print(" Fetching AI tips for user:",self.user_id)
+        print("🧠 Fetching AI tips for user:",self.user_id)
 
         try:
             tips = get_recent_suggestions(self.user_id)
-            print(f" Found {len(tips)} tips")
+            print(f"✅ Found {len(tips)} tips")
 
             if not tips:
                 no_tips = QLabel("No financial tips available yet.")
@@ -590,19 +632,19 @@ class UserDashboard(QMainWindow):
                 tip_label = QLabel(first_tip["content"])
                 tip_label.setWordWrap(True)
                 tip_label.setStyleSheet("""
-                    background-color: white;
+                    background-color:  {'#1e1e1e' if self.is_dark_mode() else 'white'};
                     padding: 20px;
                     border-radius: 10px;
                     font-size: 15px;
                     font-family: 'Segoe UI', sans-serif;
-                    color: #333;
+                    color:  {'#FFFDD0' if self.is_dark_mode() else '#333'};
                     border-left: 4px solid #d6733a;
                 """)
 
                 layout.addWidget(tip_label)
 
         except Exception as e:
-            print(f" Error displaying tips: {e}")
+            print(f"❌ Error displaying tips: {e}")
             error_label = QLabel("Could not load financial tips. Please try again later.")
             error_label.setStyleSheet("color: #dc3545; font-size: 14px;")
             layout.addWidget(error_label)
@@ -639,11 +681,12 @@ class UserDashboard(QMainWindow):
     def start_flask_thread(self):
         def run():
             try:
-                print(" Starting Flask server in thread...")
+                print("🚀 Starting Flask server in thread...")
                 self.run_flask_server()
             except Exception as e:
-                print("Flask thread crashed:")
+                print("💥 Flask thread crashed:")
                 traceback.print_exc()
 
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
+
