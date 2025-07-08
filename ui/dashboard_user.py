@@ -490,9 +490,10 @@ class UserDashboard(QMainWindow):
 
         activity_frame = QFrame()
         activity_frame.setStyleSheet("""
-            background-color: white;
+            background-color: {'#1e1e1e' if self.is_dark_mode() else 'white'};
             border-radius: 10px;
             padding: 20px;
+            color:  {'#FFFDD0' if self.is_dark_mode() else '#333'};
         """)
         activity_layout = QVBoxLayout(activity_frame)
 
@@ -689,4 +690,8 @@ class UserDashboard(QMainWindow):
 
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
+
+    def is_dark_mode(self):
+        setting = fetch_one("SELECT dark_mode FROM settings WHERE user_id = ?",(self.user_id,))
+        return bool(setting["dark_mode"]) if setting and "dark_mode" in setting.keys() else False
 
