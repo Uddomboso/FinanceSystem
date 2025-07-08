@@ -128,3 +128,17 @@ CREATE TABLE IF NOT EXISTS category_commitments (
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
     FOREIGN KEY (category_id) REFERENCES categories(category_id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS category_transfers (
+    transfer_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    account_id INTEGER NOT NULL,  -- source
+    category_id INTEGER NOT NULL,  -- target
+    amount REAL NOT NULL,
+    note TEXT,
+    transfer_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id),
+    FOREIGN KEY (category_id) REFERENCES categories(category_id)
+);
+
