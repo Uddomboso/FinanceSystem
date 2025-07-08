@@ -50,6 +50,7 @@ from ui.bank_connect_window import BankConnectWindow
 from database.db_manager import fetch_all, fetch_one, execute_query
 from core.transactions import get_total_by_type, insert_plaid_transaction
 from core.currency import convert
+from ui.commitment_form import CommitmentForm
 from core.plaid_api import create_link_token, exchange_public_token, get_accounts, get_transactions
 
 class UserDashboard(QMainWindow):
@@ -704,3 +705,6 @@ class UserDashboard(QMainWindow):
         setting = fetch_one("SELECT dark_mode FROM settings WHERE user_id = ?",(self.user_id,))
         return bool(setting["dark_mode"]) if setting and "dark_mode" in setting.keys() else False
 
+    def show_commitment_form(self):
+        self.commitment_form = CommitmentForm(self.user_id)
+        self.commitment_form.show()
