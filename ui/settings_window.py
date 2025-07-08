@@ -83,17 +83,18 @@ class SettingsWindow(QWidget):
         self.setLayout(main_layout)
 
     def load_settings(self):
-        s = fetch_one("SELECT * FROM settings WHERE user_id = ?", (self.user_id,))
+        s = fetch_one("SELECT * FROM settings WHERE user_id = ?",(self.user_id,))
         if s:
-            self.dark_mode.setChecked(bool(s.get("dark_mode", False)))
-            self.notif_box.setChecked(bool(s.get("notifications_enabled", False)))
+            self.dark_mode.setChecked(bool(s["dark_mode"]) if "dark_mode" in s.keys() else False)
+            self.notif_box.setChecked(
+                bool(s["notifications_enabled"]) if "notifications_enabled" in s.keys() else False)
 
-            currency = s.get("currency", "USD")
+            currency = s["currency"] if "currency" in s.keys() else "USD"
             currency_index = self.currency.findText(currency)
             if currency_index >= 0:
                 self.currency.setCurrentIndex(currency_index)
 
-            lang_code = s.get("language", "en")
+            lang_code = s["language"] if "language" in s.keys() else "en"
             lang_display = "English" if lang_code == "en" else "Türkçe"
             lang_index = self.language.findText(lang_display)
             if lang_index >= 0:
@@ -101,6 +102,11 @@ class SettingsWindow(QWidget):
 
             # Apply theme on load
             self.apply_theme(self.dark_mode.isChecked())
+
+            # Notify parent to apply global theme on load
+            parent = self.parent()
+            if parent and hasattr(parent,"apply_global_theme"):
+                parent.apply_global_theme(self.dark_mode.isChecked())
 
     def save_settings(self):
         dark = int(self.dark_mode.isChecked())
@@ -148,6 +154,16 @@ DARK_QSS = """
         background-color: #2c2c2c;
         color: #ffffff;
     }
+    QScrollArea {
+        background-color: #2c2c2c;
+    }
+    QFrame {
+        background-color: #1e1e1e;
+        border-radius: 10px;
+    }
+    QLabel {
+        color: #f1f1f1;
+    }
     QGroupBox {
         border: 1px solid #444;
         border-radius: 8px;
@@ -185,6 +201,7 @@ DARK_QSS = """
         background-color: #b45131;
     }
 """
+
 
 LIGHT_QSS = """
     QWidget {
