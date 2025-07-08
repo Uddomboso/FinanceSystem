@@ -42,7 +42,6 @@ class TransactionForm(QWidget):
         self.toggle_btn_layout.addWidget(self.txn_btn)
         self.toggle_btn_layout.addWidget(self.cat_btn)
 
-    # View 1: Transactions
     def init_transaction_form(self):
         layout = QVBoxLayout()
         self.amount_input = QLineEdit()
@@ -144,7 +143,6 @@ class TransactionForm(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Couldn’t save: {e}")
 
-    # View 2: Categories Grid
     def init_categories_view(self):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -179,7 +177,7 @@ class TransactionForm(QWidget):
 
     def open_transfer(self, category_id):
         form = TransferForm(self.user_id)
-        # You could pre-select the category here if you want
+
         form.cat_input.setCurrentIndex(
             next((i for i in range(form.cat_input.count()) if form.cat_input.itemData(i) == category_id), 0)
         )
