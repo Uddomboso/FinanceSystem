@@ -493,6 +493,7 @@ class UserDashboard(QMainWindow):
             background-color: {'#1e1e1e' if self.is_dark_mode() else 'white'};
             border-radius: 10px;
             padding: 20px;
+             border: none;
             color:  {'#FFFDD0' if self.is_dark_mode() else '#333'};
         """)
         activity_layout = QVBoxLayout(activity_frame)
@@ -637,6 +638,7 @@ class UserDashboard(QMainWindow):
                     padding: 20px;
                     border-radius: 10px;
                     font-size: 15px;
+                    border: none;
                     font-family: 'Segoe UI', sans-serif;
                     color:  {'#FFFDD0' if self.is_dark_mode() else '#333'};
                     border-left: 4px solid #d6733a;
