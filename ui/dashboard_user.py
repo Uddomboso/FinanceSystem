@@ -24,6 +24,12 @@ from core.currency import convert
 from ui.commitment_form import CommitmentForm
 from core.salary_checker import check_salary_reminder
 from core.commitment_manager import check_commitments
+from PyQt5.QtWidgets import (
+    QWidget,QLabel,QVBoxLayout,QHBoxLayout,QScrollArea,QSizePolicy
+)
+from PyQt5.QtCore import Qt
+from core.transfer import get_recent_category_transfers
+
 from core.plaid_api import create_link_token,exchange_public_token,get_accounts,get_transactions
 
 
@@ -232,6 +238,50 @@ class UserDashboard(QMainWindow):
         header.setFont(QFont("Segoe UI",32))
         header.setStyleSheet("color: #d6733a;")
         layout.addWidget(header)
+
+        notif_bar = QHBoxLayout()
+        notif_bar.setAlignment(Qt.AlignRight)
+
+        self.notif_btn = QPushButton()
+        self.notif_btn.setIcon(qta.icon("fa5s.bell",color="#704b3b"))
+        self.notif_btn.setIconSize(QSize(24,24))
+        self.notif_btn.setFlat(True)
+        self.notif_btn.setCursor(Qt.PointingHandCursor)
+        self.notif_btn.clicked.connect(self.toggle_notifications)
+
+        notif_bar.addWidget(self.notif_btn)
+        layout.addLayout(notif_bar)
+
+        self.notif_panel = QFrame()
+        self.notif_panel.setStyleSheet("""
+            background-color: white;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 10px;
+        """)
+        self.notif_panel.setVisible(False)
+        self.notif_panel.setFixedWidth(300)
+
+        notif_layout = QVBoxLayout(self.notif_panel)
+        notif_layout.setSpacing(5)
+
+        notifications = fetch_all("""
+            SELECT content, created_at 
+            FROM notifications 
+            WHERE user_id = ? AND notification_type = 'payment'
+            ORDER BY created_at DESC
+            LIMIT 5
+        """,(self.user_id,))
+
+        if not notifications:
+            notif_layout.addWidget(QLabel("No recent payment notifications."))
+        else:
+            for n in notifications:
+                msg = QLabel(f"🪙 {n['content']}")
+                msg.setStyleSheet("font-size: 13px;")
+                notif_layout.addWidget(msg)
+
+        layout.addWidget(self.notif_panel)
 
         header.setStyleSheet(f"""
             color: #d6733a;
@@ -655,12 +705,8 @@ class UserDashboard(QMainWindow):
         self.commitment_form = CommitmentForm(self.user_id)
         self.commitment_form.show()
 
-
-from PyQt5.QtWidgets import (
-    QWidget,QLabel,QVBoxLayout,QHBoxLayout,QScrollArea,QSizePolicy
-)
-from PyQt5.QtCore import Qt
-from core.transfer import get_recent_category_transfers
+    def toggle_notifications(self):
+        self.notif_panel.setVisible(not self.notif_panel.isVisible())
 
 
 class RecentTransfersWidget(QWidget):
