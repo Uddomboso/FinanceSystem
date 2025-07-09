@@ -53,9 +53,6 @@ class UserDashboard(QMainWindow):
         generate_suggestions(self.user_id)
         self.show_dashboard()
 
-        self.recent_transfers = RecentTransfersWidget(self.user_id)
-        self.main_layout.addWidget(self.recent_transfers)
-
         self.start_flask_thread()
 
     def is_dark_mode(self):
@@ -161,6 +158,56 @@ class UserDashboard(QMainWindow):
         logo.setAlignment(Qt.AlignCenter)
         sidebar.addWidget(logo)
 
+        notif_btn_layout = QHBoxLayout()
+        notif_btn_layout.setAlignment(Qt.AlignCenter)
+
+        self.notif_btn = QPushButton()
+        self.notif_btn.setIcon(qta.icon("fa5s.bell",color="#ffe22a"))
+        self.notif_btn.setIconSize(QSize(24,24))
+        self.notif_btn.setFixedSize(40,40)
+        self.notif_btn.setFlat(True)
+        self.notif_btn.setCursor(Qt.PointingHandCursor)
+        self.notif_btn.clicked.connect(self.toggle_notifications)
+
+        notif_btn_layout.addWidget(self.notif_btn)
+        sidebar.addLayout(notif_btn_layout)
+
+        self.notif_popup = QFrame(self)
+
+        self.notif_popup.setStyleSheet("""
+            background-color: '#1e1e1e' if self.is_dark_mode() else 'white';
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            padding: 10px;
+        """)
+
+
+        self.notif_popup.setVisible(False)
+        self.notif_popup.setFixedWidth(280)
+        self.notif_popup.setFixedHeight(180)
+        self.notif_popup.setGraphicsEffect(None)  # you can add shadow if needed
+        self.notif_popup.move(250,120)  # Adjust X, Y to place it next to the bell
+
+        notif_layout = QVBoxLayout(self.notif_popup)
+        notif_layout.setSpacing(4)
+
+        notifications = fetch_all("""
+            SELECT content, created_at 
+            FROM notifications 
+            WHERE user_id = ? AND notification_type = 'payment'
+            ORDER BY created_at DESC
+            LIMIT 5
+        """,(self.user_id,))
+
+        if not notifications:
+            notif_layout.addWidget(QLabel("No recent payment notifications."))
+        else:
+            for n in notifications:
+                label = QLabel(f"🪙 {n['content']}")
+                label.setWordWrap(True)
+                label.setStyleSheet("font-size: 13px;")
+                notif_layout.addWidget(label)
+
         nav_items = [
             ("Dashboard","fa5s.tachometer-alt",self.show_dashboard),
             ("Transactions","fa5s.exchange-alt",self.show_transactions),
@@ -238,50 +285,6 @@ class UserDashboard(QMainWindow):
         header.setFont(QFont("Segoe UI",32))
         header.setStyleSheet("color: #d6733a;")
         layout.addWidget(header)
-
-        notif_bar = QHBoxLayout()
-        notif_bar.setAlignment(Qt.AlignRight)
-
-        self.notif_btn = QPushButton()
-        self.notif_btn.setIcon(qta.icon("fa5s.bell",color="#704b3b"))
-        self.notif_btn.setIconSize(QSize(24,24))
-        self.notif_btn.setFlat(True)
-        self.notif_btn.setCursor(Qt.PointingHandCursor)
-        self.notif_btn.clicked.connect(self.toggle_notifications)
-
-        notif_bar.addWidget(self.notif_btn)
-        layout.addLayout(notif_bar)
-
-        self.notif_panel = QFrame()
-        self.notif_panel.setStyleSheet("""
-            background-color: white;
-            border: 1px solid #ccc;
-            border-radius: 8px;
-            padding: 10px;
-        """)
-        self.notif_panel.setVisible(False)
-        self.notif_panel.setFixedWidth(300)
-
-        notif_layout = QVBoxLayout(self.notif_panel)
-        notif_layout.setSpacing(5)
-
-        notifications = fetch_all("""
-            SELECT content, created_at 
-            FROM notifications 
-            WHERE user_id = ? AND notification_type = 'payment'
-            ORDER BY created_at DESC
-            LIMIT 5
-        """,(self.user_id,))
-
-        if not notifications:
-            notif_layout.addWidget(QLabel("No recent payment notifications."))
-        else:
-            for n in notifications:
-                msg = QLabel(f"🪙 {n['content']}")
-                msg.setStyleSheet("font-size: 13px;")
-                notif_layout.addWidget(msg)
-
-        layout.addWidget(self.notif_panel)
 
         header.setStyleSheet(f"""
             color: #d6733a;
@@ -706,57 +709,5 @@ class UserDashboard(QMainWindow):
         self.commitment_form.show()
 
     def toggle_notifications(self):
-        self.notif_panel.setVisible(not self.notif_panel.isVisible())
-
-
-class RecentTransfersWidget(QWidget):
-    def __init__(self,user_id):
-        super().__init__()
-        self.user_id = user_id
-        self.init_ui()
-
-    def init_ui(self):
-        layout = QVBoxLayout()
-        title = QLabel("Recent Commitment Payments")
-        title.setStyleSheet("font-weight: bold; font-size: 16px;")
-        layout.addWidget(title)
-
-        transfers = get_recent_category_transfers(self.user_id)
-
-        if not transfers:
-            layout.addWidget(QLabel("No recent commitment payments."))
-        else:
-            scroll = QScrollArea()
-            container = QWidget()
-            container_layout = QVBoxLayout()
-            container.setLayout(container_layout)
-
-            for t in transfers:
-                row = QHBoxLayout()
-                row.addWidget(QLabel(f"{t['category_name']}"))
-                row.addWidget(QLabel(f"${t['amount']:.2f}"))
-                row.addWidget(QLabel(t['transfer_date'].split(" ")[0]))
-                if t['note']:
-                    row.addWidget(QLabel(t['note']))
-                container_layout.addLayout(row)
-
-            scroll.setWidget(container)
-            scroll.setWidgetResizable(True)
-            scroll.setFixedHeight(150)
-            layout.addWidget(scroll)
-
-        self.setLayout(layout)
-
-        for t in transfers:
-            row_widget = QFrame()
-            row_layout = QHBoxLayout(row_widget)
-            row_layout.setContentsMargins(5,5,5,5)  # add padding
-
-            row_layout.addWidget(QLabel(f"{t['category_name']}"))
-            row_layout.addWidget(QLabel(f"${t['amount']:.2f}"))
-            row_layout.addWidget(QLabel(t['transfer_date'].split(" ")[0]))
-            if t['note']:
-                row_layout.addWidget(QLabel(t['note']))
-
-            container_layout.addWidget(row_widget)
-
+        is_visible = self.notif_popup.isVisible()
+        self.notif_popup.setVisible(not is_visible)
