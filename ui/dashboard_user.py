@@ -31,6 +31,11 @@ from PyQt5.QtCore import Qt
 from core.transfer import get_recent_category_transfers
 from PyQt5.QtWidgets import QGraphicsDropShadowEffect
 from core.plaid_api import create_link_token,exchange_public_token,get_accounts,get_transactions
+from ui.category_manager import CategoryManager
+from ui.savings_goal_manager import SavingsGoalManager
+
+
+
 
 
 class UserDashboard(QMainWindow):
@@ -66,9 +71,9 @@ class UserDashboard(QMainWindow):
         @app.route("/success")
         def plaid_success():
             try:
-                print(" Callback received")
+                print("✅ Callback received")
                 public_token = request.args.get("token")
-                print("Public token received:",public_token)
+                print("🔑 Public token received:",public_token)
 
                 if public_token:
                     data = exchange_public_token(public_token)
@@ -77,7 +82,7 @@ class UserDashboard(QMainWindow):
                     access_token = data.get("access_token")
                     if access_token:
                         accounts = get_accounts(access_token)
-                        print("Retrieved accounts:",accounts)
+                        print("✅ Retrieved accounts:",accounts)
 
                         for acc in accounts.get("accounts",[]):
                             account_type = "salary" if "checking" in acc.get("subtype","").lower() else "savings"
@@ -105,11 +110,11 @@ class UserDashboard(QMainWindow):
 
                         dashboard_ref.refresh_dashboard()
 
-                return "<h2> Success! You can now close this tab.</h2>"
+                return "<h2>✅ Success! You can now close this tab.</h2>"
 
             except Exception as e:
                 traceback.print_exc()
-                return f"<h2> Error:</h2><pre>{e}</pre>",500
+                return f"<h2>❌ Error:</h2><pre>{e}</pre>",500
 
         app.run(port=5000)
 
@@ -210,7 +215,7 @@ class UserDashboard(QMainWindow):
             notif_layout.addWidget(QLabel("No recent payment notifications."))
         else:
             for n in notifications:
-                label = QLabel(f" {n['content']}")
+                label = QLabel(f"🪙 {n['content']}")
                 label.setWordWrap(True)
                 label.setStyleSheet("font-size: 13px;")
                 notif_layout.addWidget(label)
@@ -250,7 +255,7 @@ class UserDashboard(QMainWindow):
         self.main_layout.addWidget(sidebar_widget)
 
     def apply_global_theme(self,dark_mode):
-        print(" Applying global theme:","dark" if dark_mode else "light")
+        print("🌙 Applying global theme:","dark" if dark_mode else "light")
         stylesheet = DARK_QSS if dark_mode else LIGHT_QSS
         QApplication.instance().setStyleSheet(stylesheet)
 
@@ -718,3 +723,11 @@ class UserDashboard(QMainWindow):
     def toggle_notifications(self):
         is_visible = self.notif_popup.isVisible()
         self.notif_popup.setVisible(not is_visible)
+
+    def open_category_manager(self):
+        dlg = CategoryManager(user_id=self.current_user_id)
+        dlg.exec_()
+
+    def open_savings_goal_manager(self):
+        dlg = SavingsGoalManager(user_id=self.current_user_id)
+        dlg.exec_()
