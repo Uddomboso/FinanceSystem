@@ -736,58 +736,81 @@ class UserDashboard(QMainWindow):
         dlg = SavingsGoalManager(user_id=self.current_user_id)
         dlg.exec_()
 
-def add_category_overview(self, layout):
-    print("📊 Loading Category Overview...")
-    rows = fetch_all("""
-        SELECT c.category_name, c.color, c.budget_amount,
-            COALESCE(SUM(t.amount), 0) as spent
-        FROM categories c
-        LEFT JOIN transactions t 
-            ON c.category_id = t.category_id AND t.user_id = ?
-        WHERE c.user_id = ?
-        GROUP BY c.category_id
-    """, (self.user_id, self.user_id))
+        def add_category_overview(self, layout):
+        from PyQt5.QtWidgets import QGridLayout
 
-    if not rows:
-        print("⚠️ No categories found.")
-        return
+        categories = fetch_all("""
+            SELECT category_name, color, budget_amount,
+                   COALESCE((
+                       SELECT SUM(amount)
+                       FROM transactions
+                       WHERE category_id = c.category_id
+                         AND transaction_type = 'expense'
+                   ), 0) AS spent
+            FROM categories c
+            WHERE user_id = ?
+        """, (self.user_id,))
 
-    wrapper = QFrame()
-    wrapper.setStyleSheet(f"""
-        background-color: {"#1e1e1e" if self.is_dark_mode() else "white"};
-        border-radius: 10px;
-        padding: 20px;
-    """)
-    wrapper_layout = QVBoxLayout(wrapper)
+        if not categories:
+            return
 
-    title = QLabel("Categories & Budgets")
-    title.setFont(QFont("Segoe UI", 16, QFont.Bold))
-    title.setStyleSheet("margin-bottom: 10px; color: #d6733a;")
-    wrapper_layout.addWidget(title)
-
-    for r in rows:
-        name = r["category_name"]
-        spent = r["spent"]
-        budget = r["budget_amount"]
-        color = r["color"] or "#3498db"
-        percent = int((spent / budget) * 100) if budget else 0
-
-        item = QFrame()
-        item.setStyleSheet("""
-            background-color: transparent;
-            padding: 10px;
-            margin-bottom: 8px;
+        wrapper = QFrame()
+        wrapper.setStyleSheet(f"""
+            background-color: {'#1e1e1e' if self.is_dark_mode() else '#ffffff'};
+            border-radius: 10px;
+            padding: 20px;
         """)
-        item_layout = QVBoxLayout(item)
+        wrapper_layout = QVBoxLayout(wrapper)
 
-        label = QLabel(f"{name}: ${spent:.2f} / ${budget:.2f} ({percent}%)")
-        label.setStyleSheet(f"""
-            color: {color};
-            font-size: 14px;
+        title = QLabel("Categories & Budgets")
+        title.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        title.setStyleSheet("color: #d6733a;")
+        wrapper_layout.addWidget(title)
+
+        grid = QGridLayout()
+        grid.setSpacing(20)
+
+        for i, cat in enumerate(categories):
+            cat_name = cat["category_name"]
+            color = cat["color"] or "#4caf50"
+            budget = cat["budget_amount"] or 1
+            spent = cat["spent"] or 0
+            pct = int((spent / budget) * 100)
+            pct = min(pct, 100)
+
+            circle = QFrame()
+            circle.setFixedSize(150, 150)
+            circle.setStyleSheet(f"""
+                background-color: {color};
+                border-radius: 75px;
+                color: white;
+            """)
+            circle_layout = QVBoxLayout(circle)
+            circle_layout.setAlignment(Qt.AlignCenter)
+
+            name_lbl = QLabel(cat_name)
+            percent_lbl = QLabel(f"{pct}%")
+            name_lbl.setAlignment(Qt.AlignCenter)
+            percent_lbl.setAlignment(Qt.AlignCenter)
+            name_lbl.setStyleSheet("color: white; font-weight: bold;")
+            percent_lbl.setStyleSheet("color: white; font-size: 20px; font-weight: bold;")
+            circle_layout.addWidget(name_lbl)
+            circle_layout.addWidget(percent_lbl)
+
+            grid.addWidget(circle, i // 3, i % 3) 
+
+        # Add category button at the end
+        add_btn = QPushButton("+")
+        add_btn.setFixedSize(100, 100)
+        add_btn.setStyleSheet("""
+            background-color: #ccc;
+            border-radius: 15px;
+            font-size: 28px;
             font-weight: bold;
+            color: #444;
         """)
-        item_layout.addWidget(label)
+     
+        grid.addWidget(add_btn, len(categories) // 3, len(categories) % 3)
 
-        wrapper_layout.addWidget(item)
-
-    layout.addWidget(wrapper)
+        wrapper_layout.addLayout(grid)
+        layout.addWidget(wrapper)
