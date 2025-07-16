@@ -757,7 +757,7 @@ class UserDashboard(QMainWindow):
         wrapper.setStyleSheet(f"""
             background-color: {'#1e1e1e' if self.is_dark_mode() else '#ffffff'};
             border-radius: 10px;
-            padding: 8px;
+            padding: 3px;
         """)
         wrapper_layout = QVBoxLayout(wrapper)
 
@@ -791,7 +791,7 @@ class UserDashboard(QMainWindow):
            # percent_lbl = QLabel(f"{pct}%")
             name_lbl.setAlignment(Qt.AlignCenter)
            # percent_lbl.setAlignment(Qt.AlignCenter)
-            name_lbl.setStyleSheet("color: white; font-weight: bold;")
+            name_lbl.setStyleSheet("color: white; font-size: 10px; font-weight: bold;")
             #percent_lbl.setStyleSheet("color: white; font-size: 5px; font-weight: bold;")
             circle_layout.addWidget(name_lbl)
            # circle_layout.addWidget(percent_lbl)
