@@ -778,10 +778,10 @@ class UserDashboard(QMainWindow):
             pct = min(pct,100)
 
             circle = QFrame()
-            circle.setFixedSize(150,150)
+            circle.setFixedSize(100,100)
             circle.setStyleSheet(f"""
                 background-color: {color};
-                border-radius: 75px;
+                border-radius: 50px;
                 color: white;
             """)
             circle_layout = QVBoxLayout(circle)
@@ -792,7 +792,7 @@ class UserDashboard(QMainWindow):
             name_lbl.setAlignment(Qt.AlignCenter)
             percent_lbl.setAlignment(Qt.AlignCenter)
             name_lbl.setStyleSheet("color: white; font-weight: bold;")
-            percent_lbl.setStyleSheet("color: white; font-size: 20px; font-weight: bold;")
+            percent_lbl.setStyleSheet("color: white; font-size: 5px; font-weight: bold;")
             circle_layout.addWidget(name_lbl)
             circle_layout.addWidget(percent_lbl)
 
