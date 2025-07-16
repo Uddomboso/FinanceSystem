@@ -731,3 +731,59 @@ class UserDashboard(QMainWindow):
     def open_savings_goal_manager(self):
         dlg = SavingsGoalManager(user_id=self.current_user_id)
         dlg.exec_()
+
+def add_category_overview(self, layout):
+    print("📊 Loading Category Overview...")
+    rows = fetch_all("""
+        SELECT c.category_name, c.color, c.budget_amount,
+            COALESCE(SUM(t.amount), 0) as spent
+        FROM categories c
+        LEFT JOIN transactions t 
+            ON c.category_id = t.category_id AND t.user_id = ?
+        WHERE c.user_id = ?
+        GROUP BY c.category_id
+    """, (self.user_id, self.user_id))
+
+    if not rows:
+        print("⚠️ No categories found.")
+        return
+
+    wrapper = QFrame()
+    wrapper.setStyleSheet(f"""
+        background-color: {"#1e1e1e" if self.is_dark_mode() else "white"};
+        border-radius: 10px;
+        padding: 20px;
+    """)
+    wrapper_layout = QVBoxLayout(wrapper)
+
+    title = QLabel("Categories & Budgets")
+    title.setFont(QFont("Segoe UI", 16, QFont.Bold))
+    title.setStyleSheet("margin-bottom: 10px; color: #d6733a;")
+    wrapper_layout.addWidget(title)
+
+    for r in rows:
+        name = r["category_name"]
+        spent = r["spent"]
+        budget = r["budget_amount"]
+        color = r["color"] or "#3498db"
+        percent = int((spent / budget) * 100) if budget else 0
+
+        item = QFrame()
+        item.setStyleSheet("""
+            background-color: transparent;
+            padding: 10px;
+            margin-bottom: 8px;
+        """)
+        item_layout = QVBoxLayout(item)
+
+        label = QLabel(f"{name}: ${spent:.2f} / ${budget:.2f} ({percent}%)")
+        label.setStyleSheet(f"""
+            color: {color};
+            font-size: 14px;
+            font-weight: bold;
+        """)
+        item_layout.addWidget(label)
+
+        wrapper_layout.addWidget(item)
+
+    layout.addWidget(wrapper)
