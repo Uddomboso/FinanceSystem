@@ -785,7 +785,7 @@ class UserDashboard(QMainWindow):
                 color: white;
             """)
             circle_layout = QVBoxLayout(circle)
-            circle_layout.setAlignment(Qt.AlignCenter)
+            
 
             name_lbl = QLabel(cat_name)
            # percent_lbl = QLabel(f"{pct}%")
