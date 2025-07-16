@@ -365,6 +365,8 @@ class UserDashboard(QMainWindow):
 
         self.add_ai_tips(layout)
 
+        self.add_category_overview(layout)
+
         self.add_recent_activity(layout)
 
         container.setLayout(layout)
