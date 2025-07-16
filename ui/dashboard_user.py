@@ -361,6 +361,8 @@ class UserDashboard(QMainWindow):
 
                 accounts_layout.addWidget(account_widget)
 
+        self.add_category_overview(layout)
+               
         self.update_financial_overview(layout)
 
         self.add_ai_tips(layout)
