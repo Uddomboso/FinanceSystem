@@ -28,6 +28,7 @@ from PyQt5.QtWidgets import (
     QWidget,QLabel,QVBoxLayout,QHBoxLayout,QScrollArea,QSizePolicy
 )
 from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QGridLayout
 from core.transfer import get_recent_category_transfers
 from PyQt5.QtWidgets import QGraphicsDropShadowEffect
 from core.plaid_api import create_link_token,exchange_public_token,get_accounts,get_transactions
@@ -362,12 +363,10 @@ class UserDashboard(QMainWindow):
                 accounts_layout.addWidget(account_widget)
 
         self.add_category_overview(layout)
-               
+
         self.update_financial_overview(layout)
 
         self.add_ai_tips(layout)
-
-        self.add_category_overview(layout)
 
         self.add_recent_activity(layout)
 
@@ -736,8 +735,8 @@ class UserDashboard(QMainWindow):
         dlg = SavingsGoalManager(user_id=self.current_user_id)
         dlg.exec_()
 
-        def add_category_overview(self, layout):
-        from PyQt5.QtWidgets import QGridLayout
+    def add_category_overview(self,layout):
+
 
         categories = fetch_all("""
             SELECT category_name, color, budget_amount,
@@ -749,7 +748,7 @@ class UserDashboard(QMainWindow):
                    ), 0) AS spent
             FROM categories c
             WHERE user_id = ?
-        """, (self.user_id,))
+        """,(self.user_id,))
 
         if not categories:
             return
@@ -763,23 +762,23 @@ class UserDashboard(QMainWindow):
         wrapper_layout = QVBoxLayout(wrapper)
 
         title = QLabel("Categories & Budgets")
-        title.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        title.setFont(QFont("Segoe UI",16,QFont.Bold))
         title.setStyleSheet("color: #d6733a;")
         wrapper_layout.addWidget(title)
 
         grid = QGridLayout()
         grid.setSpacing(20)
 
-        for i, cat in enumerate(categories):
+        for i,cat in enumerate(categories):
             cat_name = cat["category_name"]
             color = cat["color"] or "#4caf50"
             budget = cat["budget_amount"] or 1
             spent = cat["spent"] or 0
             pct = int((spent / budget) * 100)
-            pct = min(pct, 100)
+            pct = min(pct,100)
 
             circle = QFrame()
-            circle.setFixedSize(150, 150)
+            circle.setFixedSize(150,150)
             circle.setStyleSheet(f"""
                 background-color: {color};
                 border-radius: 75px;
@@ -797,11 +796,11 @@ class UserDashboard(QMainWindow):
             circle_layout.addWidget(name_lbl)
             circle_layout.addWidget(percent_lbl)
 
-            grid.addWidget(circle, i // 3, i % 3) 
+            grid.addWidget(circle,i // 3,i % 3)  # 3 per row
 
         # Add category button at the end
         add_btn = QPushButton("+")
-        add_btn.setFixedSize(100, 100)
+        add_btn.setFixedSize(100,100)
         add_btn.setStyleSheet("""
             background-color: #ccc;
             border-radius: 15px;
@@ -809,8 +808,7 @@ class UserDashboard(QMainWindow):
             font-weight: bold;
             color: #444;
         """)
-     
-        grid.addWidget(add_btn, len(categories) // 3, len(categories) % 3)
+        grid.addWidget(add_btn,len(categories) // 3,len(categories) % 3)
 
         wrapper_layout.addLayout(grid)
         layout.addWidget(wrapper)
