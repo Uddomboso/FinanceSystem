@@ -767,7 +767,7 @@ class UserDashboard(QMainWindow):
         wrapper_layout.addWidget(title)
 
         grid = QGridLayout()
-        grid.setAlignment(Qt.AlignLeft)  
+        grid.setAlignment(Qt.AlignLeft)
 
         grid.setSpacing(20)
 
@@ -785,7 +785,10 @@ class UserDashboard(QMainWindow):
                 background-color: {color};
                 border-radius: 50px;
                 color: white;
+                border: none;
+                margin: 0px;
             """)
+
             circle_layout = QVBoxLayout(circle)
 
 
