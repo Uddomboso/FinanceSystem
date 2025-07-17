@@ -2,6 +2,10 @@ from datetime import datetime
 from database.db_manager import fetch_all, fetch_one, execute_query
 
 def check_commitments(user_id):
+    setting = fetch_one("SELECT notifications_enabled FROM settings WHERE user_id = ?", (user_id,))
+    if not setting or setting["notifications_enabled"] == 0:
+        return  # Global toggle is OFF
+
     today = datetime.now()
     today_day = today.day
 
@@ -13,13 +17,9 @@ def check_commitments(user_id):
     """, (user_id,))
 
     for c in commitments:
-        if not c.get("notifications_enabled", 1):
-            continue  # Skip if user disabled reminders
-
         due_day = c["due_day"]
         days_until = due_day - today_day
 
-        # Messages
         if due_day < today_day and not c["is_paid"]:
             msg = f"⚠️ '{c['category_name']}' commitment overdue! Pay {c['amount']}"
         elif due_day == today_day and not c["is_paid"]:
@@ -27,7 +27,7 @@ def check_commitments(user_id):
         elif 0 < days_until <= 7 and not c["is_paid"]:
             msg = f"🔔 Reminder: '{c['category_name']}' due in {days_until} days"
         else:
-            continue  # No need to notify
+            continue
 
         if not already_notified(user_id, msg):
             add_notification(user_id, msg)
