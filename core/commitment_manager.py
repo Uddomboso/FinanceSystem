@@ -41,3 +41,15 @@ def add_notification(user_id, content):
         INSERT INTO ai_suggestions (user_id, content)
         VALUES (?, ?)
     """, (user_id, content))
+
+def already_notified(user_id, message):
+    result = fetch_one("""
+        SELECT 1 FROM ai_suggestions 
+        WHERE user_id = ? AND content = ? AND DATE(created_at) = DATE('now')
+    """, (user_id, message))
+    return result is not None
+
+def maybe_reset_commitments():
+    today = datetime.now()
+    if today.day == 1:
+        reset_commitments_monthly()
