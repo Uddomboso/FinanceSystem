@@ -121,15 +121,13 @@ CREATE TABLE IF NOT EXISTS category_commitments (
     user_id INTEGER NOT NULL,
     category_id INTEGER NOT NULL,
     amount REAL NOT NULL,
-    due_day INTEGER NOT NULL CHECK(due_day BETWEEN 1 AND 31), 
+    due_day INTEGER NOT NULL CHECK(due_day BETWEEN 1 AND 31), -- Day of the month
     is_paid BOOLEAN DEFAULT 0,
     last_paid_date TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    notifications_enabled BOOLEAN DEFAULT 1,  
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
     FOREIGN KEY (category_id) REFERENCES categories(category_id) ON DELETE CASCADE
 );
-
 
 CREATE TABLE IF NOT EXISTS category_transfers (
     transfer_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,4 +141,3 @@ CREATE TABLE IF NOT EXISTS category_transfers (
     FOREIGN KEY (account_id) REFERENCES accounts(account_id),
     FOREIGN KEY (category_id) REFERENCES categories(category_id)
 );
-
