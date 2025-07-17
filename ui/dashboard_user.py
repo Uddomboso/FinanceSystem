@@ -760,6 +760,7 @@ class UserDashboard(QMainWindow):
             padding: 3px;
         """)
         wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setAlignment(Qt.AlignLeft)
 
         title = QLabel("Categories & Budgets")
         title.setFont(QFont("Segoe UI",16,QFont.Bold))
