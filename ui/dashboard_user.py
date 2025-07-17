@@ -767,6 +767,8 @@ class UserDashboard(QMainWindow):
         wrapper_layout.addWidget(title)
 
         grid = QGridLayout()
+        grid.setAlignment(Qt.AlignLeft)  
+
         grid.setSpacing(20)
 
         for i,cat in enumerate(categories):
@@ -785,7 +787,7 @@ class UserDashboard(QMainWindow):
                 color: white;
             """)
             circle_layout = QVBoxLayout(circle)
-            
+
 
             name_lbl = QLabel(cat_name)
            # percent_lbl = QLabel(f"{pct}%")
