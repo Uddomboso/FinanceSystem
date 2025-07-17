@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from database.db_manager import fetch_all, fetch_one, execute_query
 
 def check_commitments(user_id):
@@ -13,18 +13,24 @@ def check_commitments(user_id):
     """, (user_id,))
 
     for c in commitments:
-        due_day = c["due_day"]
-        due_date = today.replace(day=due_day)
+        if not c.get("notifications_enabled", 1):
+            continue  # Skip if user disabled reminders
 
+        due_day = c["due_day"]
+        days_until = due_day - today_day
+
+        # Messages
         if due_day < today_day and not c["is_paid"]:
-            # overdue
-            add_notification(user_id, f"⚠️ '{c['category_name']}' commitment overdue! Pay {c['amount']}")
+            msg = f"⚠️ '{c['category_name']}' commitment overdue! Pay {c['amount']}"
         elif due_day == today_day and not c["is_paid"]:
-            # due today
-            add_notification(user_id, f"📅 '{c['category_name']}' is due today: {c['amount']}")
-        elif 0 < (due_day - today_day) <= 7 and not c["is_paid"]:
-            # upcoming
-            add_notification(user_id, f"🔔 Reminder: '{c['category_name']}' due in {due_day - today_day} days")
+            msg = f"📅 '{c['category_name']}' is due today: {c['amount']}"
+        elif 0 < days_until <= 7 and not c["is_paid"]:
+            msg = f"🔔 Reminder: '{c['category_name']}' due in {days_until} days"
+        else:
+            continue  # No need to notify
+
+        if not already_notified(user_id, msg):
+            add_notification(user_id, msg)
 
 def mark_commitment_paid(commitment_id):
     execute_query("""
@@ -33,7 +39,6 @@ def mark_commitment_paid(commitment_id):
     """, (commitment_id,))
 
 def reset_commitments_monthly():
-    # Call this on 1st of month via scheduler
     execute_query("UPDATE category_commitments SET is_paid = 0 WHERE 1=1")
 
 def add_notification(user_id, content):
