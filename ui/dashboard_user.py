@@ -736,8 +736,6 @@ class UserDashboard(QMainWindow):
         dlg.exec_()
 
     def add_category_overview(self,layout):
-
-
         categories = fetch_all("""
             SELECT category_name, color, budget_amount,
                    COALESCE((
@@ -750,14 +748,11 @@ class UserDashboard(QMainWindow):
             WHERE user_id = ?
         """,(self.user_id,))
 
-        if not categories:
-            return
-
         wrapper = QFrame()
         wrapper.setStyleSheet(f"""
             background-color: {'#1e1e1e' if self.is_dark_mode() else '#ffffff'};
             border-radius: 10px;
-            padding: 3px;
+            padding: 20px;
         """)
         wrapper_layout = QVBoxLayout(wrapper)
         wrapper_layout.setAlignment(Qt.AlignLeft)
@@ -768,30 +763,21 @@ class UserDashboard(QMainWindow):
         wrapper_layout.addWidget(title)
 
         grid = QGridLayout()
-        grid.setAlignment(Qt.AlignLeft)
-
-        grid.setSpacing(20)
+        grid.setSpacing(30)
 
         for i,cat in enumerate(categories):
             cat_name = cat["category_name"]
             color = cat["color"] or "#4caf50"
-            budget = cat["budget_amount"] or 1
             spent = cat["spent"] or 0
-            pct = int((spent / budget) * 100)
-            pct = min(pct,100)
 
+            # Circle with amount
             circle = QFrame()
-            circle.setFixedSize(100,100)
+            circle.setFixedSize(80,80)
             circle.setStyleSheet(f"""
                 background-color: {color};
-                border-radius: 50px;
-                color: white;
-                border: none;
-                margin: 0px;
+                border-radius: 40px;
             """)
-
             circle_layout = QVBoxLayout(circle)
-
             amount_lbl = QLabel(f"${spent:.0f}")
             amount_lbl.setAlignment(Qt.AlignCenter)
             amount_lbl.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
@@ -799,29 +785,30 @@ class UserDashboard(QMainWindow):
             circle_layout.addWidget(amount_lbl)
             circle_layout.addStretch()
 
-            outer = QVBoxLayout()
-            outer.setAlignment(Qt.AlignCenter)
-            outer.addWidget(circle)
+            # Name below circle
+            outer_layout = QVBoxLayout()
+            outer_layout.setAlignment(Qt.AlignCenter)
+            outer_layout.addWidget(circle)
 
             name_lbl = QLabel(cat_name)
             name_lbl.setAlignment(Qt.AlignCenter)
-            name_lbl.setStyleSheet("color: #333; font-size: 12px;")
-            outer.addWidget(name_lbl)
+            name_lbl.setStyleSheet("font-size: 12px; color: #333;")
+            outer_layout.addWidget(name_lbl)
 
             holder = QWidget()
-            holder.setLayout(outer)
-            grid.addWidget(holder,i // 4,i % 4)  # 4 per row now for more space
+            holder.setLayout(outer_layout)
 
-            grid.addWidget(circle,i // 3,i % 3)  # 3 per row
+            grid.addWidget(holder,i // 4,i % 4)
 
-        # Add category button at the end
+        # Add "+" Button
         add_btn = QPushButton("+")
-        add_btn.setFixedSize(100,100)
+        add_btn.setFixedSize(80,80)
         add_btn.setStyleSheet("""
             background-color: #007bff;
-            border-radius: 50px;
+            border-radius: 40px;
             color: white;
-            font-size: 20px;
+            font-size: 24px;
+            font-weight: bold;
         """)
 
         add_layout = QVBoxLayout()
@@ -829,14 +816,13 @@ class UserDashboard(QMainWindow):
         add_layout.addWidget(add_btn)
         add_lbl = QLabel("Add")
         add_lbl.setAlignment(Qt.AlignCenter)
-        add_lbl.setStyleSheet("color: #333; font-size: 12px;")
+        add_lbl.setStyleSheet("font-size: 12px; color: #333;")
         add_layout.addWidget(add_lbl)
 
         add_holder = QWidget()
         add_holder.setLayout(add_layout)
-        grid.addWidget(add_holder,len(categories) // 4,len(categories) % 4)
 
-        grid.addWidget(add_btn,len(categories) // 3,len(categories) % 3)
+        grid.addWidget(add_holder,len(categories) // 4,len(categories) % 4)
 
         wrapper_layout.addLayout(grid)
         layout.addWidget(wrapper)
