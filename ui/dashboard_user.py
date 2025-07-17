@@ -799,6 +799,19 @@ class UserDashboard(QMainWindow):
             circle_layout.addWidget(amount_lbl)
             circle_layout.addStretch()
 
+            outer = QVBoxLayout()
+            outer.setAlignment(Qt.AlignCenter)
+            outer.addWidget(circle)
+
+            name_lbl = QLabel(cat_name)
+            name_lbl.setAlignment(Qt.AlignCenter)
+            name_lbl.setStyleSheet("color: #333; font-size: 12px;")
+            outer.addWidget(name_lbl)
+
+            holder = QWidget()
+            holder.setLayout(outer)
+            grid.addWidget(holder,i // 4,i % 4)  # 4 per row now for more space
+
             grid.addWidget(circle,i // 3,i % 3)  # 3 per row
 
         # Add category button at the end
