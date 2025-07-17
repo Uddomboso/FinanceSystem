@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout, QComboBox, QMessageBox, QSpinBox, QCheckBox
 )
 from PyQt5.QtCore import Qt
-from database.db_manager import fetch_all, execute_query
+from database.db_manager import fetch_all, fetch_one, execute_query
 
 class CommitmentForm(QWidget):
     def __init__(self, user_id):
@@ -26,8 +26,8 @@ class CommitmentForm(QWidget):
         self.day_input.setPrefix("Day of Month: ")
         self.day_input.setValue(1)
 
-        self.notify_checkbox = QCheckBox("Enable monthly reminders")
-        self.notify_checkbox.setChecked(True)
+        self.notify_checkbox = QCheckBox("Enable monthly reminders (global)")
+        self.notify_checkbox.setChecked(self.get_notification_setting())
 
         self.save_btn = QPushButton("Save Commitment")
         self.save_btn.clicked.connect(self.save_commitment)
@@ -42,6 +42,10 @@ class CommitmentForm(QWidget):
 
         self.setLayout(layout)
 
+    def get_notification_setting(self):
+        setting = fetch_one("SELECT notifications_enabled FROM settings WHERE user_id = ?", (self.user_id,))
+        return setting and setting["notifications_enabled"] == 1
+
     def load_categories(self):
         rows = fetch_all("SELECT category_id, category_name FROM categories WHERE user_id = ?", (self.user_id,))
         self.category_input.clear()
@@ -55,10 +59,16 @@ class CommitmentForm(QWidget):
             due_day = self.day_input.value()
             notify = 1 if self.notify_checkbox.isChecked() else 0
 
+            
             execute_query("""
-                INSERT INTO category_commitments (user_id, category_id, amount, due_day, notifications_enabled)
-                VALUES (?, ?, ?, ?, ?)
-            """, (self.user_id, cat_id, amount, due_day, notify))
+                INSERT INTO category_commitments (user_id, category_id, amount, due_day)
+                VALUES (?, ?, ?, ?)
+            """, (self.user_id, cat_id, amount, due_day))
+
+          
+            execute_query("""
+                UPDATE settings SET notifications_enabled = ? WHERE user_id = ?
+            """, (notify, self.user_id))
 
             QMessageBox.information(self, "Saved", "Commitment saved successfully.")
             self.close()
