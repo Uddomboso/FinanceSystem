@@ -703,6 +703,10 @@ class UserDashboard(QMainWindow):
         self.stack.insertWidget(0,self.page_dashboard)
         self.stack.setCurrentWidget(self.page_dashboard)
 
+    def open_commitment_form(self,category_name):
+        dlg = CommitmentForm(self.user_id,category_name)
+        dlg.exec_()
+
     def start_flask_thread(self):
         def run():
             try:
