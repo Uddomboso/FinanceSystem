@@ -770,13 +770,17 @@ class UserDashboard(QMainWindow):
             color = cat["color"] or "#4caf50"
             spent = cat["spent"] or 0
 
-            # Circle with amount
-            circle = QFrame()
+            circle = QPushButton(f"${spent:.0f}")
             circle.setFixedSize(80,80)
             circle.setStyleSheet(f"""
                 background-color: {color};
                 border-radius: 40px;
+                color: white;
+                font-size: 16px;
+                font-weight: bold;
             """)
+            circle.clicked.connect(lambda _,cat=cat_name: self.open_commitment_form(cat))
+
             circle_layout = QVBoxLayout(circle)
             amount_lbl = QLabel(f"${spent:.0f}")
             amount_lbl.setAlignment(Qt.AlignCenter)
