@@ -792,15 +792,12 @@ class UserDashboard(QMainWindow):
 
             circle_layout = QVBoxLayout(circle)
 
-
-            name_lbl = QLabel(cat_name)
-           # percent_lbl = QLabel(f"{pct}%")
-            name_lbl.setAlignment(Qt.AlignCenter)
-           # percent_lbl.setAlignment(Qt.AlignCenter)
-            name_lbl.setStyleSheet("color: white; font-size: 10px; font-weight: bold;")
-            #percent_lbl.setStyleSheet("color: white; font-size: 5px; font-weight: bold;")
-            circle_layout.addWidget(name_lbl)
-           # circle_layout.addWidget(percent_lbl)
+            amount_lbl = QLabel(f"${spent:.0f}")
+            amount_lbl.setAlignment(Qt.AlignCenter)
+            amount_lbl.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
+            circle_layout.addStretch()
+            circle_layout.addWidget(amount_lbl)
+            circle_layout.addStretch()
 
             grid.addWidget(circle,i // 3,i % 3)  # 3 per row
 
