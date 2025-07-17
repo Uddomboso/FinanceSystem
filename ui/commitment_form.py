@@ -1,15 +1,15 @@
 from PyQt5.QtWidgets import (
-    QWidget, QLabel, QLineEdit, QPushButton,
+    QDialog, QLabel, QLineEdit, QPushButton,
     QVBoxLayout, QComboBox, QMessageBox, QSpinBox, QCheckBox
 )
 from PyQt5.QtCore import Qt
 from database.db_manager import fetch_all, fetch_one, execute_query
 
-class CommitmentForm(QWidget):
+class CommitmentForm(QDialog):  # hanged from QWidget
     def __init__(self, user_id, category_name=None):
         super().__init__()
         self.user_id = user_id
-        self.category_name = category_name  # Optional pre-selected category
+        self.category_name = category_name
         self.setWindowTitle("Add Monthly Commitment")
         self.setMinimumSize(400, 300)
         self.init_ui()
@@ -53,12 +53,11 @@ class CommitmentForm(QWidget):
         for row in rows:
             self.category_input.addItem(row["category_name"], row["category_id"])
 
-        # If a category was passed, select it
         if self.category_name:
             index = self.category_input.findText(self.category_name, Qt.MatchFixedString)
             if index >= 0:
                 self.category_input.setCurrentIndex(index)
-                self.category_input.setEnabled(False)  # Disable to prevent changing it
+                self.category_input.setEnabled(False)
 
     def save_commitment(self):
         try:
@@ -67,20 +66,17 @@ class CommitmentForm(QWidget):
             due_day = self.day_input.value()
             notify = 1 if self.notify_checkbox.isChecked() else 0
 
-           
             execute_query("""
                 INSERT INTO category_commitments (user_id, category_id, amount, due_day)
                 VALUES (?, ?, ?, ?)
             """, (self.user_id, cat_id, amount, due_day))
 
-            # Update global notification setting
             execute_query("""
                 UPDATE settings SET notifications_enabled = ? WHERE user_id = ?
             """, (notify, self.user_id))
 
             QMessageBox.information(self, "Saved", "Commitment saved successfully.")
-            self.close()
-
+            self.accept()  # ✅ instead of self.close() for QDialog
         except ValueError:
             QMessageBox.warning(self, "Invalid Input", "Please enter a valid amount.")
         except Exception as e:
