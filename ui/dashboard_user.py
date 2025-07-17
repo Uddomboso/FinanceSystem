@@ -818,12 +818,24 @@ class UserDashboard(QMainWindow):
         add_btn = QPushButton("+")
         add_btn.setFixedSize(100,100)
         add_btn.setStyleSheet("""
-            background-color: #ccc;
-            border-radius: 15px;
-            font-size: 28px;
-            font-weight: bold;
-            color: #444;
+            background-color: #007bff;
+            border-radius: 50px;
+            color: white;
+            font-size: 20px;
         """)
+
+        add_layout = QVBoxLayout()
+        add_layout.setAlignment(Qt.AlignCenter)
+        add_layout.addWidget(add_btn)
+        add_lbl = QLabel("Add")
+        add_lbl.setAlignment(Qt.AlignCenter)
+        add_lbl.setStyleSheet("color: #333; font-size: 12px;")
+        add_layout.addWidget(add_lbl)
+
+        add_holder = QWidget()
+        add_holder.setLayout(add_layout)
+        grid.addWidget(add_holder,len(categories) // 4,len(categories) % 4)
+
         grid.addWidget(add_btn,len(categories) // 3,len(categories) % 3)
 
         wrapper_layout.addLayout(grid)
