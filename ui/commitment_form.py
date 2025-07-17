@@ -1,9 +1,8 @@
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QLineEdit, QPushButton,
-    QVBoxLayout, QComboBox, QDateEdit, QMessageBox, QSpinBox
+    QVBoxLayout, QComboBox, QMessageBox, QSpinBox, QCheckBox
 )
 from PyQt5.QtCore import Qt
-from datetime import date
 from database.db_manager import fetch_all, execute_query
 
 class CommitmentForm(QWidget):
@@ -27,6 +26,9 @@ class CommitmentForm(QWidget):
         self.day_input.setPrefix("Day of Month: ")
         self.day_input.setValue(1)
 
+        self.notify_checkbox = QCheckBox("Enable monthly reminders")
+        self.notify_checkbox.setChecked(True)
+
         self.save_btn = QPushButton("Save Commitment")
         self.save_btn.clicked.connect(self.save_commitment)
 
@@ -35,6 +37,7 @@ class CommitmentForm(QWidget):
         layout.addWidget(QLabel("Amount"))
         layout.addWidget(self.amount_input)
         layout.addWidget(self.day_input)
+        layout.addWidget(self.notify_checkbox)
         layout.addWidget(self.save_btn)
 
         self.setLayout(layout)
@@ -50,11 +53,12 @@ class CommitmentForm(QWidget):
             cat_id = self.category_input.currentData()
             amount = float(self.amount_input.text())
             due_day = self.day_input.value()
+            notify = 1 if self.notify_checkbox.isChecked() else 0
 
             execute_query("""
-                INSERT INTO category_commitments (user_id, category_id, amount, due_day)
-                VALUES (?, ?, ?, ?)
-            """, (self.user_id, cat_id, amount, due_day))
+                INSERT INTO category_commitments (user_id, category_id, amount, due_day, notifications_enabled)
+                VALUES (?, ?, ?, ?, ?)
+            """, (self.user_id, cat_id, amount, due_day, notify))
 
             QMessageBox.information(self, "Saved", "Commitment saved successfully.")
             self.close()
