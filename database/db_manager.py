@@ -1,5 +1,17 @@
 import sqlite3
 import os
+import sqlite3
+from pprint import pprint
+
+DB_PATH = "pennywise.db"
+
+conn = sqlite3.connect(DB_PATH)
+cur = conn.cursor()
+cur.execute("PRAGMA table_info(notifications)")
+columns = cur.fetchall()
+pprint(columns)
+conn.close()
+
 
 DB_PATH = "pennywise.db"
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "schema.sql")
@@ -16,9 +28,9 @@ def initialize_db():
         with connect_db() as conn:
             with open(SCHEMA_PATH, "r") as f:
                 conn.executescript(f.read())
-        print(" Database initialized.")
+        print("✅ Database initialized.")
     else:
-        print("Database already exists.")
+        print("📦 Database already exists.")
 
 
 def execute_query(query, params=(), commit=False):
