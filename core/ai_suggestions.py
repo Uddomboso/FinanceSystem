@@ -1,6 +1,10 @@
 from database.db_manager import fetch_all, fetch_one, execute_query
 import requests
 import os
+import json
+print("Sending to GROQ:", json.dumps(data, indent=2))
+
+
 
 # Set this as an env var or paste your key directly
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or "."
@@ -25,8 +29,17 @@ def generate_openai_tip(summary):
                 },
                 {
                     "role": "user",
-                    "content": f"User issue:\n{summary}\n\nGive **1 short financial tip** (1-2 sentences max). Make the intro sentence strong, avoid fluff."
+                    "content": (
+                        f"{summary}\n\n"
+                        "Write exactly three sentences:\n"
+                        "1. First line: Clearly state the financial problem in one sentence.\n"
+                        "2. Second line: Begin with '1.' and give the first solution in one sentence.\n"
+                        "3. Third line: Begin with '2.' and give the second solution in one sentence.\n"
+                        "Do not add any introduction, explanation, or extra words before or after.\n"
+                        "The response must be exactly 3 lines and immediately usable in Word."
+                    )
                 }
+
             ],
             "temperature": 0.7,
             "max_tokens": 100
