@@ -1,0 +1,4894 @@
+"""
+Main Dashboard - Modern UI with Navigation & Notifications
+"""
+
+import sys
+from PyQt5.QtWidgets import (
+    QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QLabel,
+    QScrollArea,QFrame,QSizePolicy,QPushButton,QMessageBox,
+    QApplication,QStyle,QStackedWidget,QToolBar,QAction,
+    QStatusBar,QMenu,QSystemTrayIcon,QGridLayout, QSpacerItem,
+    QWidgetAction,QDialog,QRadioButton,QButtonGroup
+)
+from PyQt5.QtCore import Qt,QTimer,QPropertyAnimation,QEasingCurve,QSize,QEvent
+from PyQt5.QtGui import QFont,QIcon,QPalette,QColor,QPainter,QPixmap
+from datetime import datetime, timedelta
+
+# ===== COMPONENT IMPORTS =====
+from ui.components.mood_meter import MoodMeter
+from ui.components.badges_widget import BadgesWidget
+from ui.components.enhanced_penny_widget import EnhancedPennyWidget
+from ui.components.cards import CardWidget
+from ui.components.metrics import MetricChip
+from ui.components.progress import ProgressBar
+from ui.tutorial_system import TutorialManager
+from core.theme_manager import theme_manager
+from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+from PyQt5.QtWidgets import QGraphicsOpacityEffect
+from database.db_manager import fetch_all, fetch_one, execute_query
+from core.plaid_api import create_link_token, exchange_public_token, get_accounts, get_transactions, get_account_balances
+from core.logger import logger
+import qtawesome as qta
+from PyQt5.QtWidgets import QStatusBar,QMenu,QSystemTrayIcon,QGridLayout, QSpacerItem
+from PyQt5.QtWidgets import QGraphicsDropShadowEffect, QGridLayout
+from PyQt5.QtGui import QColor
+from database.db_manager import fetch_all
+# Ensure QPixmap, QFont, Qt are already imported from PyQt5.QtGui/QtCore
+from PyQt5.QtWidgets import QMessageBox
+from database.db_manager import fetch_all, fetch_one, execute_query
+from PyQt5.QtWidgets import QMessageBox, QInputDialog
+from database.db_manager import fetch_all, fetch_one, execute_query
+from core.commitment_manager import (
+    check_commitments,
+    process_immediate_commitment,
+    create_commitment,
+    get_suggested_amount
+)
+from ui.commitment_form import CommitmentForm, CommitmentSelectionDialog
+from database.db_manager import fetch_all, fetch_one, execute_query
+from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QSize
+from PyQt5.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QFrame, QSizePolicy, QSpacerItem
+
+
+# --- Define Constants (Crucial for styling) ---
+NAV_BAR_BG_COLOR = "#1F2937"      # Dark background for the navigation and new title bar
+NAV_TEXT_COLOR = "#D1D5DB"       # Light gray text color
+ORANGE_ACCENT = "#F4A446"        # Accent color
+# -----------------------------------------------
+
+class NotificationBadge(QLabel):
+    """Small notification badge for navigation items"""
+
+    def __init__(self,count=0,parent=None):
+        super().__init__(parent)
+        self.count = count
+        self.setFixedSize(18,18)
+        self.setStyleSheet("""
+            NotificationBadge {
+                background: #EF4444;
+                color: white;
+                border-radius: 9px;
+                font-size: 10px;
+                font-weight: bold;
+            }
+        """)
+        self.setAlignment(Qt.AlignCenter)
+        self.update_count(count)
+
+    def update_count(self,count):
+        self.count = count
+        if count > 0:
+            self.setText(str(count) if count <= 99 else "99+")
+            self.show()
+        else:
+            self.hide()
+
+
+class CustomTitleBar(QWidget):
+    """
+    A custom, draggable title bar with dark background and window control buttons.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.main_window = parent
+        self.setFixedHeight(30)  # Height of the standard title bar
+        self.setMouseTracking(True)
+
+        # Apply the dark background color (#1F2937)
+        self.setStyleSheet(f"""
+            CustomTitleBar {{
+                background-color: {NAV_BAR_BG_COLOR};
+                color: {NAV_TEXT_COLOR};
+                border: none;
+            }}
+        """)
+
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 0, 5, 0)
+        layout.setSpacing(5)
+
+        # Title label removed
+        layout.addStretch()
+
+        # 2. Control Buttons (Minimize, Maximize, Close) - FIXED ICON NAMES
+        btn_min = self.create_button('fa5s.window-minimize', self.main_window.showMinimized, "Minimize")
+        self.btn_max_restore = self.create_button('fa5s.window-maximize', self.toggle_maximize, "Maximize")
+        btn_close = self.create_button('fa5s.times', self.main_window.close, "Close")
+
+        layout.addWidget(btn_min)
+        layout.addWidget(self.btn_max_restore)
+        layout.addWidget(btn_close)
+
+    def create_button(self, icon_id, action, tooltip):
+        btn = QPushButton()
+        btn.setFixedSize(QSize(25, 25))
+        btn.setToolTip(tooltip)
+
+        try:
+            icon = qta.icon(icon_id, color=NAV_TEXT_COLOR)
+            btn.setIcon(icon)
+        except Exception as e:
+            print(f"Warning: Could not load icon {icon_id}: {e}")
+            # Fallback to text if icon fails
+            if 'minimize' in icon_id:
+                btn.setText("_")
+            elif 'maximize' in icon_id:
+                btn.setText("□")
+            elif 'times' in icon_id:
+                btn.setText("×")
+
+        btn.clicked.connect(action)
+
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                padding: 0;
+                border-radius: 3px;
+                color: {NAV_TEXT_COLOR};
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #374151;
+            }}
+            QPushButton#CloseButton:hover {{
+                background-color: #DC2626;
+                color: white;
+            }}
+        """)
+        if 'times' in icon_id:
+            btn.setObjectName("CloseButton")
+
+        return btn
+
+    # --- Draggability methods ---
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_position = event.globalPos()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and self.drag_position:
+            if self.main_window.isMaximized():
+                # If window is maximized, restore it first
+                self.main_window.showNormal()
+                # Adjust position to make dragging natural
+                cursor_x = event.globalPos().x()
+                window_width = self.main_window.width()
+                new_x = cursor_x - (window_width / 2)
+                self.main_window.move(int(new_x), 0)
+                self.drag_position = event.globalPos()
+            else:
+                delta = event.globalPos() - self.drag_position
+                self.main_window.move(self.main_window.pos() + delta)
+                self.drag_position = event.globalPos()
+            event.accept()
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.toggle_maximize()
+
+    def toggle_maximize(self):
+        if self.main_window.isMaximized():
+            self.main_window.showNormal()
+            try:
+                self.btn_max_restore.setIcon(qta.icon('fa5s.window-maximize', color=NAV_TEXT_COLOR))
+            except:
+                self.btn_max_restore.setText("□")
+            self.btn_max_restore.setToolTip("Maximize")
+        else:
+            self.main_window.showMaximized()
+            try:
+                self.btn_max_restore.setIcon(qta.icon('fa5s.window-restore', color=NAV_TEXT_COLOR))
+            except:
+                self.btn_max_restore.setText("❐")
+            self.btn_max_restore.setToolTip("Restore")
+
+
+
+
+class MetricsCarousel(QWidget):
+    """Modern metrics carousel with real Plaid API data"""
+
+    def __init__(self,user_id,parent=None):
+        super().__init__(parent)
+        self.user_id = user_id
+        self.current_index = 0
+        self.metrics_data = []  # Will be populated with real data
+        self.setup_ui()
+        self.load_real_data()
+        self.start_rotation()
+
+    def setup_ui(self):
+        """Setup UI for carousel"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.carousel_layout = QHBoxLayout()
+        self.carousel_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(self.carousel_layout)
+        layout.addStretch()
+
+    def setup_metrics_carousel(self,layout):
+        """3-card financial overview with real data"""
+        # Create the 3-card container
+        overview_frame = QFrame()
+        overview_frame.setStyleSheet("QFrame { padding-top: 0px; }")
+        overview_layout = QHBoxLayout(overview_frame)
+        overview_layout.setSpacing(15)
+        overview_layout.setContentsMargins(0,0,0,0)
+        
+        # Store layout and frame for refresh
+        self.overview_frame = overview_frame
+        self.overview_layout = overview_layout
+
+        try:
+            # Import the required functions
+            from database.db_manager import fetch_all,fetch_one
+
+            # Get checking account balance - first try Plaid, then fallback to transactions
+            checking_balance = 0
+            has_plaid_checking = False
+            
+            # Check if main account (checking) exists
+            main_account = fetch_one("""
+                SELECT account_id FROM accounts 
+                WHERE user_id = ? AND account_type = 'salary' AND is_primary = 1
+                LIMIT 1
+            """, (self.user_id,))
+            
+            # Check if savings account exists
+            savings_account = fetch_one("""
+                SELECT account_id FROM accounts 
+                WHERE user_id = ? AND account_type = 'savings' AND is_primary = 1
+                LIMIT 1
+            """, (self.user_id,))
+            
+            has_main_account = main_account is not None
+            has_savings_account = savings_account is not None
+            
+            # Get checking account balance - ONLY the primary main account
+            checking_balance = 0
+            if has_main_account:
+                main_account_data = fetch_one("""
+                    SELECT account_id, plaid_token
+                    FROM accounts 
+                    WHERE user_id = ? 
+                    AND account_type = 'salary' AND is_primary = 1
+                    AND plaid_token IS NOT NULL
+                    LIMIT 1
+                """,(self.user_id,))
+                
+                if main_account_data:
+                    from core.plaid_api import get_account_balances
+                    try:
+                        balances_data = get_account_balances(main_account_data["plaid_token"])
+                        if "error" not in balances_data:
+                            for acc_balance in balances_data.get("accounts",[]):
+                                if acc_balance["account_id"] == main_account_data["account_id"]:
+                                    balance = acc_balance["balances"].get("available",0) or 0
+                                    checking_balance = balance
+                                    break
+                    except Exception as e:
+                        logger.error(f"Error fetching checking balance: {e}")
+
+            # Get savings balance - ONLY the primary savings account
+            savings = 0
+            if has_savings_account:
+                savings_account_data = fetch_one("""
+                    SELECT account_id, plaid_token
+                    FROM accounts 
+                    WHERE user_id = ? 
+                    AND account_type = 'savings' AND is_primary = 1
+                    AND plaid_token IS NOT NULL
+                    LIMIT 1
+                """,(self.user_id,))
+                
+                if savings_account_data:
+                    from core.plaid_api import get_account_balances
+                    try:
+                        balances_data = get_account_balances(savings_account_data["plaid_token"])
+                        if "error" not in balances_data:
+                            for acc_balance in balances_data.get("accounts",[]):
+                                if acc_balance["account_id"] == savings_account_data["account_id"]:
+                                    balance = acc_balance["balances"].get("available",0) or 0
+                                    savings = balance
+                                    break
+                    except Exception as e:
+                        logger.error(f"Error fetching savings balance: {e}")
+
+            # Get commitments (unpaid)
+            commitments_row = fetch_one("""
+                SELECT COALESCE(SUM(amount), 0) AS total
+                FROM category_commitments
+                WHERE user_id = ? AND COALESCE(is_paid, 0) = 0
+            """,(self.user_id,))
+            try:
+                commitments = commitments_row["total"] if commitments_row and "total" in commitments_row.keys() and commitments_row["total"] is not None else 0
+            except (KeyError, TypeError, AttributeError):
+                commitments = 0
+
+            # Calculate balances
+            available_balance = checking_balance if has_main_account else 0
+            price_after_commitments = (checking_balance - commitments) if has_main_account else 0
+
+            # Get currency
+            user_currency = fetch_one("SELECT currency FROM settings WHERE user_id = ?",(self.user_id,))
+            try:
+                currency = user_currency["currency"] if user_currency and "currency" in user_currency.keys() else "USD"
+            except (KeyError, TypeError, AttributeError):
+                currency = "USD"
+
+            # Create cards - ALWAYS show empty cards with add buttons when balance is 0 or no account
+            # This ensures users always see the option to add accounts
+            if has_savings_account and savings > 0:
+                self.savings_card = self.create_finance_card(
+                    " Savings Balance",
+                    f"{currency} {savings:,.2f}",
+                    "#10B981",
+                    "positive"
+                )
+            else:
+                # Show empty card with add button (when no account OR balance is 0)
+                def show_link_bank():
+                    # Find the dashboard window by traversing parent widgets
+                    widget = self
+                    while widget:
+                        if hasattr(widget, 'show_link_bank'):
+                            widget.show_link_bank()
+                            return
+                        widget = widget.parent()
+                    # Fallback: try to find DashboardMain window
+                    from PyQt5.QtWidgets import QApplication
+                    for widget in QApplication.topLevelWidgets():
+                        if hasattr(widget, 'show_link_bank'):
+                            widget.show_link_bank()
+                            return
+                
+                self.savings_card = self.create_empty_card(
+                    " Savings Balance",
+                    "Add Savings Account",
+                    show_link_bank
+                )
+
+            # Price After Commitments always shows as finance card (even with 0.00)
+            self.commitments_card = self.create_finance_card(
+                "Price After Commitments",
+                f"{currency} {price_after_commitments:,.2f}",
+                "#F59E0B",
+                "warning"
+            )
+            
+            # Available Balance shows empty card if no account or balance is 0
+            if has_main_account and checking_balance > 0:
+                self.available_card = self.create_finance_card(
+                    "Available Balance",
+                    f"{currency} {available_balance:,.2f}",
+                    "#10B981",
+                    "positive"
+                )
+            else:
+                # Show empty card with add button
+                def show_link_bank_main():
+                    # Find the dashboard window by traversing parent widgets
+                    widget = self
+                    while widget:
+                        if hasattr(widget, 'show_link_bank'):
+                            widget.show_link_bank()
+                            return
+                        widget = widget.parent()
+                    # Fallback: try to find DashboardMain window
+                    from PyQt5.QtWidgets import QApplication
+                    for widget in QApplication.topLevelWidgets():
+                        if hasattr(widget, 'show_link_bank'):
+                            widget.show_link_bank()
+                            return
+                
+                self.available_card = self.create_empty_card(
+                    "Available Balance",
+                    "Add Bank Account",
+                    show_link_bank_main
+                )
+
+            # Make Balance After Commitments card 1/8 bigger (160 * 1.125 = 180)
+            self.commitments_card.setFixedHeight(180)
+            overview_layout.addWidget(self.savings_card)
+            overview_layout.addWidget(self.commitments_card)
+            overview_layout.addWidget(self.available_card)
+
+        except Exception as e:
+            print(f"Error loading financial data: {e}")
+            # Fallback to empty cards with add buttons if real data fails
+            def show_link_bank_fallback():
+                # Find the dashboard window by traversing parent widgets
+                widget = self
+                while widget:
+                    if hasattr(widget, 'show_link_bank'):
+                        widget.show_link_bank()
+                        return
+                    widget = widget.parent()
+                # Fallback: try to find DashboardMain window
+                from PyQt5.QtWidgets import QApplication
+                for widget in QApplication.topLevelWidgets():
+                    if hasattr(widget, 'show_link_bank'):
+                        widget.show_link_bank()
+                        return
+            
+            self.savings_card = self.create_empty_card(
+                " Savings Balance",
+                "Add Savings Account",
+                show_link_bank_fallback
+            )
+
+            # Price After Commitments always shows as finance card (even with 0.00)
+            self.commitments_card = self.create_finance_card(
+                "Price After Commitments",
+                f"{currency} 0.00",
+                "#F59E0B",
+                "warning"
+            )
+
+            self.available_card = self.create_empty_card(
+                "Available Balance",
+                "Add Bank Account",
+                show_link_bank_fallback
+            )
+
+            self.commitments_card.setFixedHeight(180)
+            overview_layout.addWidget(self.savings_card)
+            overview_layout.addWidget(self.commitments_card)
+            overview_layout.addWidget(self.available_card)
+
+        layout.addWidget(overview_frame)
+
+    def refresh_metrics_cards(self):
+        """Refresh the metrics cards by clearing and rebuilding them"""
+        if not hasattr(self, 'overview_layout'):
+            return
+        
+        # Clear existing cards
+        while self.overview_layout.count():
+            item = self.overview_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        # Rebuild cards with fresh data
+        # Store the parent frame before clearing
+        parent_frame = self.overview_layout.parent()
+        if parent_frame:
+            # Clear the frame's layout
+            if parent_frame.layout():
+                while parent_frame.layout().count():
+                    item = parent_frame.layout().takeAt(0)
+                    if item.widget():
+                        item.widget().deleteLater()
+            # Rebuild
+            self.setup_metrics_carousel(parent_frame.layout() if parent_frame.layout() else None)
+
+    def load_real_data(self):
+        """Load real financial data using your existing Plaid API logic"""
+        try:
+            # Import the required functions
+            from database.db_manager import fetch_all,fetch_one
+            from core.plaid_api import get_account_balances
+
+            # Get REAL checking account balance from Plaid
+            checking_balance = 0
+            has_plaid_checking = False
+
+            # Get Plaid checking accounts (which are stored as 'salary' type)
+            plaid_accounts = fetch_all("""
+                SELECT account_id, plaid_token, account_type, bank_name
+                FROM accounts 
+                WHERE user_id = ? 
+                AND account_type = 'salary'
+                AND plaid_token IS NOT NULL
+            """,(self.user_id,))
+
+            if plaid_accounts:
+                has_plaid_checking = True
+                for account in plaid_accounts:
+                    try:
+                        balances_data = get_account_balances(account["plaid_token"])
+                        # Check if response contains an error
+                        if "error" in balances_data:
+                            logger.warning(f"Plaid balance error for account {account['account_id']}: {balances_data['error']}")
+                            continue
+                        for acc_balance in balances_data.get("accounts",[]):
+                            if acc_balance["account_id"] == account["account_id"]:
+                                balance = acc_balance["balances"].get("available",0)
+                                checking_balance += balance
+                    except Exception as e:
+                        logger.error(f"Error fetching balance for account {account['account_id']}: {e}")
+
+            # If Plaid failed, use transaction-based calculation
+            if not has_plaid_checking or checking_balance == 0:
+                checking_balance_row = fetch_one("""
+                    SELECT SUM(
+                        CASE 
+                            WHEN transaction_type = 'income' THEN amount 
+                            WHEN transaction_type = 'expense' THEN -amount 
+                            ELSE 0 
+                        END
+                    ) as balance
+                    FROM transactions
+                    WHERE user_id = ?
+                """,(self.user_id,))
+                checking_balance = checking_balance_row["balance"] if checking_balance_row and checking_balance_row[
+                    "balance"] is not None else 0
+
+            # Get savings balance - first try Plaid savings accounts, then fallback to transaction-based
+            savings = 0
+            plaid_savings_accounts = fetch_all("""
+                SELECT account_id, plaid_token, account_type, bank_name
+                FROM accounts 
+                WHERE user_id = ? 
+                AND account_type = 'savings'
+                AND plaid_token IS NOT NULL
+            """,(self.user_id,))
+            
+            if plaid_savings_accounts:
+                # Get real savings balance from Plaid
+                for account in plaid_savings_accounts:
+                    try:
+                        balances_data = get_account_balances(account["plaid_token"])
+                        if "error" in balances_data:
+                            logger.warning(f"Plaid savings balance error for account {account['account_id']}: {balances_data['error']}")
+                            continue
+                        for acc_balance in balances_data.get("accounts",[]):
+                            if acc_balance["account_id"] == account["account_id"]:
+                                balance = acc_balance["balances"].get("available",0)
+                                savings += balance
+                    except Exception as e:
+                        logger.error(f"Error fetching savings balance for account {account['account_id']}: {e}")
+            
+            # If no Plaid savings accounts, use transaction-based calculation as fallback
+            # Count income transactions to savings accounts OR Savings category transactions
+            if not plaid_savings_accounts:
+                savings_row = fetch_one("""
+                    SELECT COALESCE(SUM(t.amount), 0) AS total
+                    FROM transactions t
+                    LEFT JOIN categories c ON t.category_id = c.category_id
+                    LEFT JOIN accounts a ON t.account_id = a.id
+                    WHERE t.user_id = ? 
+                    AND (
+                        (c.category_name = 'Savings' AND t.transaction_type = 'income')
+                        OR (a.account_type = 'savings' AND t.transaction_type = 'income')
+                    )
+                """,(self.user_id,))
+                savings = savings_row["total"] if savings_row and savings_row["total"] is not None else 0
+
+            # Get commitments (unpaid) - handle NULL is_paid values
+            commitments_row = fetch_one("""
+                SELECT COALESCE(SUM(amount), 0) AS total
+                FROM category_commitments
+                WHERE user_id = ? AND COALESCE(is_paid, 0) = 0
+            """,(self.user_id,))
+            # Handle sqlite3.Row object
+            try:
+                commitments = commitments_row["total"] if commitments_row and "total" in commitments_row.keys() and commitments_row["total"] is not None else 0
+            except (KeyError, TypeError, AttributeError):
+                commitments = 0
+
+            # Calculate balances according to user's logic:
+            # Available Balance = checking account balance (money currently in account)
+            # Price After Commitments = checking balance - unpaid commitments (what's left after paying all unpaid commitments)
+            available_balance = checking_balance  # Available balance IS the checking balance
+            price_after_commitments = checking_balance - commitments  # Price after paying all unpaid commitments
+
+            # Get currency
+            user_currency = fetch_one("SELECT currency FROM settings WHERE user_id = ?",(self.user_id,))
+            # Handle sqlite3.Row object
+            try:
+                currency = user_currency["currency"] if user_currency and "currency" in user_currency.keys() else "USD"
+            except (KeyError, TypeError, AttributeError):
+                currency = "USD"
+
+            # Get weekly spending (last 7 days)
+            weekly_spending_row = fetch_one("""
+                SELECT SUM(amount) as total
+                FROM transactions 
+                WHERE user_id = ? 
+                AND transaction_type = 'expense'
+                AND date >= date('now', '-7 days')
+            """,(self.user_id,))
+            weekly_spending = weekly_spending_row["total"] if weekly_spending_row and weekly_spending_row[
+                "total"] is not None else 0
+
+            # Get goals progress (average of all goals)
+            goals_progress_row = fetch_one("""
+                SELECT AVG(progress_percentage) as avg_progress
+                FROM savings_goals
+                WHERE user_id = ? AND is_completed = 0
+            """,(self.user_id,))
+            goals_progress = goals_progress_row["avg_progress"] if goals_progress_row and goals_progress_row[
+                "avg_progress"] is not None else 0
+
+            # Format the data for the carousel
+            self.metrics_data = [
+                (f"{currency} {available_balance:,.2f}","Available Balance","up" if available_balance > 0 else "neutral" if available_balance == 0 else "down",
+                 "#10B981" if available_balance > 0 else "#6B7280" if available_balance == 0 else "#EF4444"),
+                (f"{currency} {weekly_spending:,.2f}","Weekly Spending","down","#EF4444"),
+                (f"{currency} {savings:,.2f}","Total Savings","up" if savings > 0 else "neutral" if savings == 0 else "down",
+                 "#10B981" if savings > 0 else "#6B7280" if savings == 0 else "#EF4444"),
+                (f"{goals_progress:.0f}%","Goals Progress","up","#3B82F6")
+            ]
+
+        except Exception as e:
+            print(f"Error loading real financial data: {e}")
+            # Fallback to demo data if real data fails
+            self.metrics_data = [
+                ("$2,847.50","Available Balance","up","#10B981"),
+                ("$1,243.75","Weekly Spending","down","#EF4444"),
+                ("$648.20","Total Savings","up","#10B981"),
+                ("72%","Goals Progress","up","#3B82F6")
+            ]
+
+    def create_metric_card(self,value,label,trend,color):
+        """Create a single metric card"""
+        frame = QFrame()
+        frame.setStyleSheet(f"""
+            QFrame {{
+                background: white;
+                border: 1px solid #E5E7EB;
+                border-radius: 16px;
+                padding: 25px;
+            }}
+        """)
+        frame.setFixedSize(280,120)
+        frame.setSizePolicy(QSizePolicy.Fixed,QSizePolicy.Fixed)
+
+        layout = QVBoxLayout(frame)
+        layout.setSpacing(8)
+
+        # Value with trend indicator
+        value_layout = QHBoxLayout()
+        value_layout.setContentsMargins(0,0,0,0)
+
+        value_label = QLabel(value)
+        value_label.setFont(QFont("Segoe UI",24,QFont.Bold))
+        value_label.setStyleSheet(f"color: {color};")
+
+        trend_icon = QLabel("↗" if trend == "up" else "↘")
+        trend_icon.setStyleSheet(f"""
+            color: {color};
+            font-size: 18px;
+            font-weight: bold;
+        """)
+
+        value_layout.addWidget(value_label)
+        value_layout.addWidget(trend_icon)
+        value_layout.addStretch()
+
+        # Label
+        label_label = QLabel(label)
+        label_label.setStyleSheet("color: #6B7280; font-size: 14px; font-weight: 500;")
+
+        layout.addLayout(value_layout)
+        layout.addWidget(label_label)
+        layout.addStretch()
+
+        return frame
+
+    def show_current_metric(self):
+        """Show current metric in carousel"""
+        if not self.metrics_data:
+            return
+
+        # Clear previous content
+        for i in reversed(range(self.carousel_layout.count())):
+            widget = self.carousel_layout.itemAt(i).widget()
+            if widget:
+                widget.deleteLater()
+
+        # Add current metric
+        value,label,trend,color = self.metrics_data[self.current_index]
+        metric_card = self.create_metric_card(value,label,trend,color)
+        self.carousel_layout.addStretch()
+        self.carousel_layout.addWidget(metric_card)
+        self.carousel_layout.addStretch()
+
+    def next_metric(self):
+        """Show next metric"""
+        if not self.metrics_data:
+            return
+        self.current_index = (self.current_index + 1) % len(self.metrics_data)
+        self.show_current_metric()
+        self.restart_rotation()
+
+    def previous_metric(self):
+        """Show previous metric"""
+        if not self.metrics_data:
+            return
+        self.current_index = (self.current_index - 1) % len(self.metrics_data)
+        self.show_current_metric()
+        self.restart_rotation()
+
+    def start_rotation(self):
+        """Start automatic rotation"""
+        if not self.metrics_data:
+            return
+        self.rotation_timer = QTimer()
+        self.rotation_timer.timeout.connect(self.next_metric)
+        self.rotation_timer.start(5000)  # Rotate every 5 seconds
+
+    def restart_rotation(self):
+        """Restart rotation timer"""
+        if not self.metrics_data:
+            return
+        self.rotation_timer.stop()
+        self.rotation_timer.start(5000)
+
+    def refresh_data(self):
+        """Refresh the carousel with updated data"""
+        self.load_real_data()
+        self.current_index = 0
+        self.show_current_metric()
+        self.restart_rotation()
+
+    def create_finance_card(self,title,value,color,card_type):
+        """Create a clean finance card with visible text"""
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background: white;
+                border: 1px solid #E5E7EB;
+                border-radius: 16px;
+            }}
+            QFrame:hover {{
+                border: 1px solid {color};
+                background: #F9FAFB;
+            }}
+        """)
+        card.setFixedHeight(160)
+        card.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed)
+
+        # Main layout for the card
+        main_layout = QVBoxLayout(card)
+        main_layout.setContentsMargins(30,25,30,25)  # Increased padding
+        main_layout.setSpacing(10)
+
+        # Title label - make sure it's visible
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"""
+            QLabel {{
+                color: #374151;
+                font-size: 16px;
+                font-weight: 600;
+                background: transparent;
+                border: none;
+            }}
+        """)
+        title_label.setAlignment(Qt.AlignLeft)
+
+        # Value label - make sure it's visible and large
+        value_label = QLabel(value)
+        value_label.setStyleSheet(f"""
+            QLabel {{
+                color: {color};
+                font-size: 42px;
+                font-weight: bold;
+                background: transparent;
+                border: none;
+            }}
+        """)
+        value_label.setAlignment(Qt.AlignLeft)
+
+        # Add labels to layout
+        main_layout.addWidget(title_label)
+        main_layout.addWidget(value_label)
+        main_layout.addStretch()
+
+        # Subtle shadow
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(15)
+        shadow.setXOffset(0)
+        shadow.setYOffset(3)
+        shadow.setColor(QColor(0,0,0,25))
+        card.setGraphicsEffect(shadow)
+
+        return card
+
+    def create_empty_card(self, title, button_text, button_callback):
+        """Create an empty state card with a prominent '+' button to add account"""
+        from PyQt5.QtWidgets import QFrame, QVBoxLayout, QLabel, QPushButton
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtGui import QColor
+        from PyQt5.QtWidgets import QGraphicsDropShadowEffect, QSizePolicy
+        import qtawesome as qta
+        
+        card = QFrame()
+        card.setFixedHeight(160)
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        main_layout = QVBoxLayout(card)
+        main_layout.setContentsMargins(30, 25, 30, 25)
+        main_layout.setSpacing(12)
+        main_layout.setAlignment(Qt.AlignCenter)
+
+        # Title label
+        title_label = QLabel(title)
+        title_label.setStyleSheet("""
+            QLabel {
+                color: #6B7280;
+                font-size: 16px;
+                font-weight: 600;
+                background: transparent;
+                border: none;
+            }
+        """)
+        title_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(title_label)
+
+        # Add a visible button instead of just text
+        add_button = QPushButton(button_text)
+        add_button.setCursor(Qt.PointingHandCursor)
+        add_button.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #d6733a, stop:1 #b45131);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 20px;
+                font-size: 14px;
+                font-weight: 600;
+                min-width: 150px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #e6824a, stop:1 #c56141);
+                transform: scale(1.05);
+            }
+            QPushButton:pressed {
+                background: #b45131;
+            }
+        """)
+        add_button.clicked.connect(button_callback)
+        main_layout.addWidget(add_button)
+
+        # Make entire card clickable as well for better UX
+        def card_clicked(event):
+            button_callback()
+        
+        card.mousePressEvent = card_clicked
+        card.setCursor(Qt.PointingHandCursor)
+
+        # Update card style to show it's clickable
+        card.setStyleSheet("""
+            QFrame {
+                background: white;
+                border: 2px dashed #D1D5DB;
+                border-radius: 16px;
+            }
+            QFrame:hover {
+                border-color: #d6733a;
+                background: #fffaf5;
+            }
+        """)
+
+        # Subtle shadow
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(15)
+        shadow.setXOffset(0)
+        shadow.setYOffset(3)
+        shadow.setColor(QColor(0, 0, 0, 25))
+        card.setGraphicsEffect(shadow)
+
+        return card
+
+
+class ModernNavigationBar(QWidget):
+    """Modern left sidebar navigation with icons and text."""
+
+    def __init__(self,parent=None,logout_callback=None,nav_callbacks=None):
+        super().__init__(parent)
+        self.logout_callback = logout_callback
+        self.nav_callbacks = nav_callbacks or {}
+        self.setFixedWidth(240)
+        self.setContentsMargins(0,0,0,0)
+        # Ensure stylesheet background paints for QWidget
+        self.setAttribute(Qt.WA_StyledBackground, True)
+
+        # SET THE BACKGROUND COLOR ON THE SIDEBAR
+        self.setStyleSheet("""
+                   ModernNavigationBar {
+                       background-color: #e8d2c4; /* darker shade than #efe3dc */
+                       border-right: 1px solid #e0d3cc;
+                   }
+               """)
+
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0,0,0,0)
+        layout.setSpacing(0)
+
+        # Define Dark Colors
+        LIGHT_TEXT = "#704b3b"
+        MEDIUM_TEXT = "#704b3b"
+        ORANGE_ACCENT = "#d6733a"  # active accent
+        ICON_COLOR = "#704b3b"
+
+        # Logo section at top
+        logo_container = QWidget()
+        logo_layout = QHBoxLayout(logo_container)
+        logo_layout.setContentsMargins(20,20,20,20)
+
+        logo_label = QLabel("PW")
+        logo_label.setStyleSheet(f"""
+            QLabel {{
+                color: {ORANGE_ACCENT}; 
+                font-weight: bold; 
+                font-size: 18px;
+                background: rgba(244, 164, 70, 0.2);
+                border-radius: 12px;
+                padding: 10px;
+            }}
+        """)
+        logo_label.setAlignment(Qt.AlignCenter)
+        logo_label.setFixedSize(48,48)
+        logo_layout.addWidget(logo_label)
+        layout.addWidget(logo_container)
+
+        # Notification button (moved from bottom) - centered
+        notification_container = QWidget()
+        notification_layout = QHBoxLayout(notification_container)
+        notification_layout.setContentsMargins(20,0,20,10)
+        notification_layout.setAlignment(Qt.AlignCenter)
+
+        self.notification_btn = QPushButton()
+        self.notification_btn.setFixedSize(40,40)
+        self.notification_btn.setIcon(qta.icon('fa5s.bell',color=ICON_COLOR))
+        self.notification_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: 1px solid #e7ddd6;
+                color: {ICON_COLOR};
+                border-radius: 8px;
+            }}
+            QPushButton:hover {{ 
+                background: rgba(214, 115, 58, 0.08);
+                border-color: {ORANGE_ACCENT};
+            }}
+        """)
+
+        self.notification_badge = NotificationBadge(3)
+        notification_layout.addWidget(self.notification_btn)
+        notification_layout.addWidget(self.notification_badge)
+        notification_layout.setAlignment(self.notification_badge,Qt.AlignTop | Qt.AlignLeft)
+        layout.addWidget(notification_container)
+
+        # Remove separator under logo for a cleaner, more open sidebar
+        separator = QFrame()
+        separator.setFixedHeight(0)
+        separator.setStyleSheet("background: transparent;")
+        separator.setVisible(False)
+
+        # Navigation items (vertical)
+        nav_items = QVBoxLayout()
+        nav_items.setContentsMargins(12,20,12,20)
+        nav_items.setSpacing(4)
+
+        nav_data = [
+            ("Dashboard", "fa5s.tachometer-alt"),
+            ("Transactions", "fa5s.exchange-alt"),
+            ("Accounts", "fa5s.money-bill-wave"),
+            ("Reports", "fa5s.chart-bar"),
+            ("Settings", "fa5s.cog"),
+            ("Link Bank", "fa5s.university")
+        ]
+
+        self.nav_buttons = {}
+        for text,icon_id in nav_data:
+            btn = QPushButton(text)
+
+            state_aware_icon = qta.icon(
+                icon_id,
+                color=ICON_COLOR,
+                color_checked=ORANGE_ACCENT
+            )
+            btn.setIcon(state_aware_icon)
+
+            btn.setCheckable(True)
+            btn.setFixedHeight(52)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    color: {MEDIUM_TEXT};
+                    border: none;
+                    border-radius: 8px;
+                    padding: 10px 20px;
+                    font-weight: 500;
+                    font-size: 18px;
+                    text-align: left;
+                }}
+                QPushButton:hover {{
+                    color: {LIGHT_TEXT};
+                    background: rgba(214, 115, 58, 0.10);
+                }}
+                QPushButton:checked {{
+                    color: {ORANGE_ACCENT};
+                    font-weight: 600;
+                    background: rgba(214, 115, 58, 0.18);
+                    border-left: 3px solid {ORANGE_ACCENT};
+                }}
+            """)
+
+            # Connect button to navigation method using callbacks
+            if text in self.nav_callbacks:
+                btn.clicked.connect(self.nav_callbacks[text])
+
+            nav_items.addWidget(btn)
+            self.nav_buttons[text] = btn
+
+        self.nav_buttons["Dashboard"].setChecked(True)
+        nav_items.addStretch()
+        layout.addLayout(nav_items)
+
+        # Bottom section with notification and settings
+        bottom_section = QVBoxLayout()
+        bottom_section.setContentsMargins(12,0,12,20)
+        bottom_section.setSpacing(8)
+
+        # Remove separator above bottom actions for a more spacious look
+        separator2 = QFrame()
+        separator2.setFixedHeight(0)
+        separator2.setStyleSheet("background: transparent;")
+        separator2.setVisible(False)
+
+        # Logout button
+        logout_btn = QPushButton("Logout")
+        logout_btn.setIcon(qta.icon('fa5s.sign-out-alt', color=ICON_COLOR))
+        logout_btn.setFixedHeight(40)
+        logout_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {ICON_COLOR};
+                border: 1px solid #e7ddd6;
+                border-radius: 8px;
+                font-family: 'Poppins', sans-serif;
+                font-size: 14px;
+                font-weight: 500;
+                padding: 8px 16px;
+            }}
+            QPushButton:hover {{ 
+                background: rgba(239, 68, 68, 0.1);
+                border-color: #EF4444;
+                color: #EF4444;
+            }}
+        """)
+        if self.logout_callback:
+            logout_btn.clicked.connect(self.logout_callback)
+        bottom_section.addWidget(logout_btn)
+
+        layout.addStretch()
+        layout.addLayout(bottom_section)
+        self.setLayout(layout)
+
+
+class CommitmentTrackerWidget(QWidget):
+    def __init__(self,user_id,parent=None):
+        super().__init__(parent)
+        self.user_id = user_id
+        self.parent_dashboard = parent  # Store reference to dashboard for refreshing
+        print(f"DEBUG: CommitmentTrackerWidget created for user {user_id}")
+        self.setup_ui()
+        self.load_commitments()
+
+    def setup_ui(self):
+        """Setup ONLY the commitment tracker widget's internal layout"""
+        print("DEBUG: Setting up CommitmentTrackerWidget UI")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0,0,0,0)
+        layout.setSpacing(12)
+
+
+        # Commitments container (grid of circular tiles)
+        self.commitments_container = QWidget()
+        self.commitments_layout = QGridLayout(self.commitments_container)
+        self.commitments_layout.setHorizontalSpacing(24)
+        self.commitments_layout.setVerticalSpacing(20)
+        self.commitments_layout.setContentsMargins(0,0,0,0)
+
+        # Scroll area for commitments
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+            QScrollArea > QWidget > QWidget {
+                background: transparent;
+            }
+        """)
+        scroll.setFixedHeight(180)
+        scroll.setWidget(self.commitments_container)
+
+        layout.addWidget(scroll)
+
+        # Add commitment circle button
+        self.add_circle_btn = QPushButton("+")
+        self.add_circle_btn.setFixedSize(96,96)
+        self.add_circle_btn.setSizePolicy(QSizePolicy.Fixed,QSizePolicy.Fixed)
+        self.add_circle_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: 2px dashed #D1D5DB;
+                border-radius: 48px;
+                color: #6B7280;
+                font-weight: 700;
+                font-size: 24px;
+            }
+            QPushButton:hover {
+                background: #F9FAFB;
+                border-color: #3B82F6;
+                color: #3B82F6;
+            }
+        """)
+        self.add_circle_btn.clicked.connect(self.add_commitment)
+        # We'll place this button in grid during load_commitments()
+
+        # Add savings commitment button
+        self.savings_setup_btn = QPushButton()
+        self.savings_setup_btn.setFixedSize(96,96)
+        self.savings_setup_btn.setSizePolicy(QSizePolicy.Fixed,QSizePolicy.Fixed)
+        self.savings_setup_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: 2px dashed #D1D5DB;
+                border-radius: 48px;
+                color: #6B7280;
+                font-weight: 600;
+                font-size: 11px;
+                text-align: center;
+            }
+            QPushButton:hover {
+                background: #F9FAFB;
+                border-color: #D7C6E6;
+                color: #D7C6E6;
+            }
+        """)
+        self.savings_setup_btn.setText("Setup\nsavings\ncommitment")
+        self.savings_setup_btn.clicked.connect(self.setup_savings_commitment)
+
+
+
+    # ... keep the rest of your methods
+    def load_commitments(self):
+        """Load commitments and render as circular tiles in a grid."""
+
+        # Clear all existing grid items
+        while self.commitments_layout.count():
+            item = self.commitments_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.setParent(None)  # Remove from layout
+                if w is not self.add_circle_btn and w is not self.savings_setup_btn:
+                    w.deleteLater()  # Delete non-button widgets
+
+        try:
+            # Use COALESCE to handle NULL is_paid values (treat NULL as 0)
+            commitments = fetch_all("""
+                SELECT cc.*, c.category_name, c.color,
+                       COALESCE(cc.is_paid, 0) as is_paid
+                FROM category_commitments cc
+                JOIN categories c ON cc.category_id = c.category_id
+                WHERE cc.user_id = ?
+                ORDER BY COALESCE(cc.is_paid, 0) ASC, cc.amount DESC
+            """, (self.user_id,))
+            
+            # Check if there's a Savings commitment - handle sqlite3.Row and None values
+            has_savings = False
+            try:
+                for commit in commitments:
+                    try:
+                        cat_name = commit['category_name'] if 'category_name' in commit.keys() else None
+                        if cat_name and str(cat_name).lower() == 'savings':
+                            has_savings = True
+                            break
+                    except (KeyError, TypeError, AttributeError):
+                        continue
+            except:
+                has_savings = False
+
+            if not commitments:
+                empty_label = QLabel("No active commitments\nAdd recurring payments like Netflix, Spotify, etc.")
+                empty_label.setAlignment(Qt.AlignCenter)
+                empty_label.setStyleSheet("""
+                    color: #6B7280;
+                    font-size: 14px;
+                    padding: 40px;
+                    background: #F9FAFB;
+                    border-radius: 12px;
+                    border: 2px dashed #E5E7EB;
+                """)
+                empty_label.setMinimumHeight(120)
+                # place the savings setup button, add circle and empty message
+                self.commitments_layout.addWidget(self.savings_setup_btn, 0, 0)
+                self.commitments_layout.addWidget(self.add_circle_btn, 0, 1)
+                self.commitments_layout.addWidget(empty_label, 0, 2, 1, 3)
+                return
+
+            # Grid placement
+            max_cols = 5
+            row = 0
+            col = 0
+            for commitment in commitments:
+                # Handle sqlite3.Row object - use bracket notation with safety checks
+                try:
+                    color = commitment['color'] if 'color' in commitment.keys() and commitment['color'] else '#6B7280'
+                except (KeyError, TypeError):
+                    color = '#6B7280'
+                
+                try:
+                    due_day = commitment['due_day'] if 'due_day' in commitment.keys() and commitment['due_day'] else 1
+                except (KeyError, TypeError):
+                    due_day = 1
+                # Handle is_paid - sqlite3.Row uses [] not .get(), COALESCE ensures it's always 0 or 1
+                try:
+                    is_paid_raw = commitment['is_paid']
+                    if is_paid_raw is None:
+                        is_paid = 0
+                    elif isinstance(is_paid_raw, bool):
+                        is_paid = 1 if is_paid_raw else 0
+                    else:
+                        is_paid = int(is_paid_raw) if is_paid_raw else 0
+                except (KeyError, TypeError):
+                    is_paid = 0
+
+                # Extract values from sqlite3.Row with safety checks
+                try:
+                    category_name = commitment['category_name'] if 'category_name' in commitment.keys() else 'Unknown'
+                except (KeyError, TypeError):
+                    category_name = 'Unknown'
+                
+                try:
+                    amount = commitment['amount'] if 'amount' in commitment.keys() else 0
+                except (KeyError, TypeError):
+                    amount = 0
+                
+                try:
+                    commitment_id = commitment['commitment_id'] if 'commitment_id' in commitment.keys() else None
+                except (KeyError, TypeError):
+                    commitment_id = None
+                
+                try:
+                    category_id = commitment['category_id'] if 'category_id' in commitment.keys() else None
+                except (KeyError, TypeError):
+                    category_id = None
+                
+                if not commitment_id:
+                    continue  # Skip if we can't get commitment_id
+                
+                circle = self.create_commitment_circle(
+                    category_name,
+                    amount,
+                    commitment_id,
+                    category_id,
+                    color,
+                    due_day,
+                    is_paid
+                )
+                circle.setSizePolicy(QSizePolicy.Fixed,QSizePolicy.Fixed)
+                self.commitments_layout.addWidget(circle, row, col, alignment=Qt.AlignCenter)
+                col += 1
+                if col >= max_cols:
+                    col = 0
+                    row += 1
+
+            # Add savings setup button if no savings commitment exists
+            if not has_savings:
+                self.commitments_layout.addWidget(self.savings_setup_btn, row, col, alignment=Qt.AlignCenter)
+                col += 1
+                if col >= max_cols:
+                    col = 0
+                    row += 1
+
+            # Add the "+" circle at the next slot
+            self.commitments_layout.addWidget(self.add_circle_btn, row, col, alignment=Qt.AlignCenter)
+
+        except Exception as e:
+            # Print the actual error for debugging
+            print(f"Error loading commitments: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            error_label = QLabel(f"Unable to load commitments\nError: {str(e)}\nPlease try again later")
+            error_label.setAlignment(Qt.AlignCenter)
+            error_label.setStyleSheet("""
+                color: #6B7280;
+                font-size: 14px;
+                padding: 40px;
+                background: #F9FAFB;
+                border-radius: 12px;
+                border: 2px dashed #E5E7EB;
+            """)
+            self.commitments_layout.addWidget(error_label, 0, 0)
+
+
+
+
+    def create_commitment_widget(self,category_name,amount,commitment_id,category_id,color,due_day):
+        """Create a legacy row-style widget (retained but unused)."""
+        widget = QFrame()
+        widget.setStyleSheet(f"""
+            QFrame {{
+                background: white;
+                border: 1px solid #E5E7EB;
+                border-radius: 12px;
+                padding: 16px;
+            }}
+            QFrame:hover {{
+                border-color: {color};
+                background: #F9FAFB;
+            }}
+        """)
+
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0,0,0,0)
+        layout.setSpacing(12)
+
+        # Color indicator
+        color_indicator = QLabel()
+        color_indicator.setFixedSize(8,40)
+        color_indicator.setStyleSheet(f"""
+            background: {color};
+            border-radius: 4px;
+        """)
+        layout.addWidget(color_indicator)
+
+        # Commitment details
+        details_layout = QVBoxLayout()
+        details_layout.setSpacing(4)
+
+        name_label = QLabel(category_name)
+        name_label.setStyleSheet("font-weight: 600; color: #374151; font-size: 14px;")
+
+        amount_label = QLabel(f"${amount:.2f}/month")
+        amount_label.setStyleSheet("color: #6B7280; font-size: 13px;")
+
+        # Status with due day information
+        today = datetime.now().day
+        status_text = "🔄 Due today!" if today == due_day else f"📅 Due day {due_day}"
+        status_color = "#EF4444" if today == due_day else "#F59E0B"
+
+        status_label = QLabel(status_text)
+        status_label.setStyleSheet(f"color: {status_color}; font-size: 12px; font-weight: 500;")
+
+        details_layout.addWidget(name_label)
+        details_layout.addWidget(amount_label)
+        details_layout.addWidget(status_label)
+        layout.addLayout(details_layout)
+
+        layout.addStretch()
+
+        # Action buttons
+        actions_layout = QHBoxLayout()
+        actions_layout.setSpacing(8)
+
+        # Mark as paid button
+        pay_btn = QPushButton("Mark Paid")
+        pay_btn.setFixedSize(80,32)
+        pay_btn.setStyleSheet("""
+            QPushButton {
+                background: #10B981;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #059669;
+            }
+        """)
+        pay_btn.clicked.connect(lambda: self.mark_as_paid(commitment_id,category_name))
+
+        # Remove button
+        remove_btn = QPushButton("Remove")
+        remove_btn.setFixedSize(70,32)
+        remove_btn.setStyleSheet("""
+            QPushButton {
+                background: #6B7280;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #4B5563;
+            }
+        """)
+        remove_btn.clicked.connect(lambda: self.remove_commitment(commitment_id))
+
+        actions_layout.addWidget(pay_btn)
+        actions_layout.addWidget(remove_btn)
+        layout.addLayout(actions_layout)
+
+        return widget
+
+    def create_commitment_circle(self,category_name,amount,commitment_id,category_id,color,due_day,is_paid=0):
+        """Create a circular tile for a commitment with context menu actions."""
+        # Normalize color palette: enforce light, muted tones for commitments only
+        def get_muted_pastel_color(name:str, fallback:str) -> str:
+            key = (name or "").lower()
+            mapping = {
+                'bill': '#F6C1B5',      # muted salmon
+                'rent': '#FAD4C0',      # soft peach
+                'utilities': '#CFE7F6', # soft sky
+                'internet': '#CFE7F6',
+                'phone': '#BEE3D2',     # mint
+                'savings': '#B3D9F2',   # soft blue (CHANGED from lavender)
+                'subscription': '#F4DEB3', # soft mustard
+                'netflix': '#D7C6E6',   # lavender
+                'spotify': '#BEE3D2',   # mint
+                'amazon': '#FAD4C0',    # soft peach
+                'gym': '#FFD4E5',       # soft pink (CHANGED from lavender)
+                'insurance': '#E8D5C4',  # beige
+                'groceries': '#D4EDDA',  # soft green
+                'transportation': '#FFF3CD',  # soft yellow
+                'entertainment': '#E9D5FF',  # soft purple
+                'healthcare': '#FFCCCB',  # light rose
+                'education': '#B8E0D2',  # mint green
+                'dining': '#FFE5B4',  # soft orange
+                'shopping': '#FFD9E3'  # rose pink
+            }
+            for k,v in mapping.items():
+                if k in key:
+                    return v
+            # default to a soft neutral if unknown or saturated
+            return '#E8E3DC'
+
+        pastel_bg = get_muted_pastel_color(category_name, color)
+        accent = '#e89574'  # reserved soft terracotta for emphasis
+        neutral_ring = '#e7ddd6'
+        
+        # For paid commitments, use brown ring
+        if is_paid:
+            ring = '#8B4513'  # Brown for paid commitments
+        else:
+            # ring color: accent if due today, otherwise neutral
+            ring = accent if datetime.now().day == (due_day or 1) else neutral_ring
+
+        btn = QPushButton()
+        btn.setFixedSize(96,96)
+        
+        # For paid commitments, show brown checkmark instead of amount
+        if is_paid:
+            # Create brown checkmark icon (check-circle in brown) - smaller size
+            check_icon = qta.icon('fa5s.check-circle', color='#8B4513')  # Brown color
+            btn.setIcon(check_icon)
+            btn.setIconSize(QSize(24, 24))  # Reduced from 36x36 to 24x24
+            # Icon alignment: centered horizontally, positioned above text
+            btn.setLayoutDirection(Qt.LeftToRight)
+            # Show category name below the icon
+            btn.setText(f"\n{category_name}")
+            amount_text = f"${amount:.0f}" if amount >= 100 else f"${amount:.2f}"
+            btn.setToolTip(f"{category_name}\n{amount_text}/month\n✅ Paid")
+        else:
+            # Content text (two-line: amount then name)
+            amount_text = f"${amount:.0f}" if amount >= 100 else f"${amount:.2f}"
+            btn.setText(f"{amount_text}\n{category_name}")
+            
+            # Get detection method for tooltip
+            try:
+                commitment_info = fetch_one("""
+                    SELECT COALESCE(detection_method, 0) as detection_method 
+                    FROM category_commitments 
+                    WHERE commitment_id = ? AND user_id = ?
+                """, (commitment_id, self.user_id))
+                if commitment_info:
+                    try:
+                        dm = commitment_info['detection_method'] if commitment_info['detection_method'] is not None else 0
+                    except (KeyError, TypeError):
+                        dm = 0
+                else:
+                    dm = 0
+            except:
+                dm = 0
+            
+            detection_label = {0: "Manual", 1: "Smart Detect", 2: "Pay as you go"}.get(dm, "Manual")
+            btn.setToolTip(f"{category_name}\n{amount_text}/month\nDue day {due_day}\nDetection: {detection_label}")
+        
+        # Apply styling after setting icon/text
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {pastel_bg};
+                color: #704b3b;
+                border: 3px solid {ring};
+                border-radius: 48px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                border: 4px solid {ring};
+            }}
+        """)
+
+        def open_menu(pos=None):
+            from assets.styles.penny_colors import PennyColors
+            
+            menu = QMenu(btn)
+            # Style menu with PennyWise theme colors
+            # Get commitment details to check detection method
+            try:
+                commitment = fetch_one("""
+                    SELECT COALESCE(detection_method, 0) as detection_method 
+                    FROM category_commitments 
+                    WHERE commitment_id = ? AND user_id = ?
+                """, (commitment_id, self.user_id))
+                
+                # Handle sqlite3.Row object
+                if commitment:
+                    try:
+                        detection_method = commitment['detection_method'] if commitment['detection_method'] is not None else 0
+                    except (KeyError, TypeError):
+                        detection_method = 0
+                else:
+                    detection_method = 0
+            except:
+                detection_method = 0
+            
+            # Map detection method to text for tooltip
+            detection_text = {
+                0: "Manual",
+                1: "Smart Detect",
+                2: "Pay as you go"
+            }.get(detection_method, "Manual")
+            
+            # Get commitment paid status to show appropriate menu items
+            try:
+                commitment_status = fetch_one("""
+                    SELECT COALESCE(is_paid, 0) as is_paid 
+                    FROM category_commitments 
+                    WHERE commitment_id = ? AND user_id = ?
+                """, (commitment_id, self.user_id))
+                if commitment_status:
+                    try:
+                        is_paid_status = commitment_status['is_paid'] if commitment_status['is_paid'] is not None else 0
+                    except (KeyError, TypeError):
+                        is_paid_status = 0
+                else:
+                    is_paid_status = 0
+            except:
+                is_paid_status = 0
+            
+            # Add actions based on payment status
+            if is_paid_status:
+                # If paid, show "Unmark as Paid" option
+                act_unmark_paid = menu.addAction("Unmark as Paid")
+                act_unmark_paid.setObjectName("unmark_paid_action")
+            else:
+                # If not paid, show payment options
+                act_mark_paid = menu.addAction("Mark as Paid Manually")
+                act_mark_paid.setObjectName("mark_paid_action")
+                
+                act_smart_detect = menu.addAction("Smart Detect")
+                act_smart_detect.setObjectName("smart_detect_action")
+                
+                act_pay_as_you_go = menu.addAction("Pay now")
+                act_pay_as_you_go.setObjectName("pay_as_you_go_action")
+            
+            # Add separator
+            menu.addSeparator()
+            
+            act_remove = menu.addAction("Delete Category")
+            act_remove.setObjectName("delete_category_action")
+            
+            # Style menu with colored items using object names
+            menu.setStyleSheet(f"""
+                QMenu {{
+                    background-color: {PennyColors.SURFACE};
+                    border: 1px solid #E5E7EB;
+                    border-radius: 8px;
+                    padding: 4px;
+                }}
+                QMenu::item {{
+                    padding: 10px 20px;
+                    font-family: 'Segoe UI', system-ui, sans-serif;
+                    font-size: 14px;
+                    color: {PennyColors.TEXT_PRIMARY};
+                    border-radius: 6px;
+                }}
+                QMenu::item:selected {{
+                    background-color: #F3F4F6;
+                }}
+                QMenu::item[objectName="mark_paid_action"] {{
+                    color: {PennyColors.TEXT_PRIMARY};
+                }}
+                QMenu::item[objectName="smart_detect_action"] {{
+                    color: {PennyColors.INFO};
+                }}
+                QMenu::item[objectName="pay_as_you_go_action"] {{
+                    color: {PennyColors.PRIMARY};
+                }}
+                QMenu::item[objectName="unmark_paid_action"] {{
+                    color: {PennyColors.WARNING};
+                }}
+                QMenu::item[objectName="delete_category_action"] {{
+                    color: {PennyColors.ERROR};
+                    font-weight: 600;
+                }}
+                QMenu::separator {{
+                    height: 1px;
+                    background-color: #E5E7EB;
+                    margin: 4px 8px;
+                }}
+            """)
+            
+            # Show menu at cursor position if pos provided, otherwise center of button
+            if pos:
+                global_pos = btn.mapToGlobal(pos)
+            else:
+                global_pos = btn.mapToGlobal(btn.rect().center())
+            chosen = menu.exec_(global_pos)
+            
+            if is_paid_status:
+                # Handle actions for paid commitments
+                if chosen == act_unmark_paid:
+                    self.unmark_as_paid(commitment_id, category_name)
+                elif chosen == act_remove:
+                    self.remove_commitment(commitment_id)
+            else:
+                # Handle actions for unpaid commitments
+                if chosen == act_mark_paid:
+                    self.mark_as_paid(commitment_id, category_name)
+                elif chosen == act_smart_detect:
+                    self.trigger_smart_detect(commitment_id, category_name)
+                elif chosen == act_pay_as_you_go:
+                    self.pay_as_you_go(commitment_id, category_name, amount)
+                elif chosen == act_remove:
+                    self.remove_commitment(commitment_id)
+
+        # Set context menu policy for right-click
+        btn.setContextMenuPolicy(Qt.CustomContextMenu)
+        btn.customContextMenuRequested.connect(lambda pos: open_menu(pos))
+        
+        # Also allow left-click to show menu
+        btn.clicked.connect(lambda: open_menu(None))
+        
+        # Show menu on hover (with slight delay to avoid accidental triggers)
+        hover_timer = QTimer(btn)
+        hover_timer.setSingleShot(True)
+        hover_timer.timeout.connect(lambda: open_menu(None))
+        
+        def enter_event(event):
+            hover_timer.start(500)  # 500ms delay before showing menu on hover
+            QPushButton.enterEvent(btn, event)
+        
+        def leave_event(event):
+            hover_timer.stop()
+            QPushButton.leaveEvent(btn, event)
+        
+        # Install event filter for hover detection
+        class HoverEventFilter(QWidget):
+            def __init__(self, timer, menu_func):
+                super().__init__()
+                self.timer = timer
+                self.menu_func = menu_func
+            
+            def eventFilter(self, obj, event):
+                if obj == btn:
+                    if event.type() == QEvent.Enter:
+                        self.timer.start(500)
+                    elif event.type() == QEvent.Leave:
+                        self.timer.stop()
+                return super().eventFilter(obj, event)
+        
+        hover_filter = HoverEventFilter(hover_timer, open_menu)
+        btn.installEventFilter(hover_filter)
+        
+        return btn
+
+    def unmark_as_paid(self, commitment_id, category_name):
+        """Unmark commitment as paid (set back to unpaid)"""
+        try:
+            from database.db_manager import execute_query
+            execute_query("""
+                UPDATE category_commitments 
+                SET is_paid = 0, last_paid_date = NULL
+                WHERE commitment_id = ? AND user_id = ?
+            """, (commitment_id, self.user_id), commit=True)
+            
+            QMessageBox.information(self, "Success", f"{category_name} marked as unpaid")
+            self.load_commitments()
+            # Refresh dashboard metrics to update price after commitments
+            if self.parent_dashboard:
+                self.parent_dashboard.refresh_dashboard()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to unmark as paid: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    def mark_as_paid(self,commitment_id,category_name):
+        """Mark commitment as paid manually - NO transaction created"""
+        try:
+            from core.commitment_manager import mark_commitment_paid_manually
+
+            success = mark_commitment_paid_manually(self.user_id,commitment_id)
+            if success:
+                QMessageBox.information(self,"Success",f"{category_name} marked as paid!")
+                self.load_commitments()
+                # Refresh dashboard metrics to update available balance IMMEDIATELY
+                if self.parent_dashboard:
+                    self.parent_dashboard.refresh_dashboard()
+                    # CRITICAL: Explicitly refresh metrics cards to update "Price After Commitments"
+                    if hasattr(self.parent_dashboard, 'refresh_metrics_cards_main'):
+                        self.parent_dashboard.refresh_metrics_cards_main()
+                    if hasattr(self.parent_dashboard, 'metrics_carousel'):
+                        self.parent_dashboard.metrics_carousel.refresh_metrics_cards()
+                # Trigger commitment check to update notifications (after refresh)
+                from core.commitment_manager import check_commitments
+                check_commitments(self.user_id)
+            else:
+                QMessageBox.warning(self,"Error","Failed to process payment")
+        except Exception as e:
+            # Fallback: manually mark as paid
+            try:
+                execute_query("""
+                    UPDATE category_commitments 
+                    SET is_paid = 1, last_paid_date = ?
+                    WHERE commitment_id = ?
+                """,(datetime.now().isoformat(),commitment_id),commit=True)
+
+                # Add notification
+                from core.commitment_manager import add_notification
+                add_notification(self.user_id,f"✅ {category_name} marked as paid!","payment")
+
+                QMessageBox.information(self,"Success",f"{category_name} marked as paid!")
+                self.load_commitments()
+                # Refresh dashboard metrics to update available balance IMMEDIATELY
+                if self.parent_dashboard:
+                    self.parent_dashboard.refresh_dashboard()
+                    # CRITICAL: Explicitly refresh metrics cards to update "Price After Commitments"
+                    if hasattr(self.parent_dashboard, 'refresh_metrics_cards_main'):
+                        self.parent_dashboard.refresh_metrics_cards_main()
+                    if hasattr(self.parent_dashboard, 'metrics_carousel'):
+                        self.parent_dashboard.metrics_carousel.refresh_metrics_cards()
+                # Trigger commitment check to update notifications (after refresh)
+                from core.commitment_manager import check_commitments
+                check_commitments(self.user_id)
+
+            except Exception as fallback_error:
+                QMessageBox.warning(self,"Error",f"Failed to mark as paid: {str(fallback_error)}")
+
+    def trigger_smart_detect(self, commitment_id, category_name):
+        """Trigger Smart Detect to scan recent transactions for this commitment"""
+        try:
+            # Get commitment details
+            commitment = fetch_one("""
+                SELECT cc.*, c.category_name 
+                FROM category_commitments cc
+                JOIN categories c ON cc.category_id = c.category_id
+                WHERE cc.commitment_id = ? AND cc.user_id = ?
+            """, (commitment_id, self.user_id))
+            
+            if not commitment:
+                QMessageBox.warning(self, "Error", "Commitment not found")
+                return
+            
+            # Get recent transactions (last 30 days)
+            from datetime import datetime, timedelta
+            start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+            
+            # Get commitment amount - handle sqlite3.Row
+            try:
+                commitment_amount = commitment['amount']
+            except (KeyError, TypeError):
+                commitment_amount = 0
+            
+            transactions = fetch_all("""
+                SELECT t.*, c.category_name 
+                FROM transactions t
+                LEFT JOIN categories c ON t.category_id = c.category_id
+                WHERE t.user_id = ? 
+                AND t.date >= ? 
+                AND t.transaction_type = 'expense'
+                AND ABS(t.amount - ?) <= 1.0
+                ORDER BY t.date DESC
+            """, (self.user_id, start_date, commitment_amount))
+            
+            # Known brands for matching
+            known_brands = ['netflix', 'spotify', 'apple music', 'applemusic', 'amazon prime', 
+                          'amazon', 'hulu', 'disney', 'youtube', 'google', 'microsoft',
+                          'adobe', 'dropbox', 'zoom', 'slack', 'discord', 'twitch']
+            
+            category_name_lower = category_name.lower()
+            matched_transactions = []
+            
+            for txn in transactions:
+                try:
+                    txn_desc = (txn['description'] or '').lower()
+                    # Check if transaction matches by brand or category name
+                    matches_brand = any(brand in txn_desc or brand in category_name_lower for brand in known_brands)
+                    matches_category = category_name_lower in txn_desc
+                    
+                    if matches_brand or matches_category:
+                        matched_transactions.append(txn)
+                except (KeyError, TypeError):
+                    continue
+            
+            if matched_transactions:
+                # Check if results are similar or different
+                amounts = [txn['amount'] for txn in matched_transactions]
+                unique_amounts = set(round(amt, 2) for amt in amounts)
+                descriptions = [txn['description'] for txn in matched_transactions]
+                
+                # If all amounts are the same and descriptions are similar, auto-select
+                # If amounts differ significantly or descriptions are very different, let user choose
+                amounts_vary_significantly = len(unique_amounts) > 1
+                descriptions_vary = len(set(desc.lower() for desc in descriptions)) > 1
+                
+                if amounts_vary_significantly or (len(matched_transactions) > 1 and descriptions_vary):
+                    # Multiple different results - let user pick
+                    
+                    dialog = QDialog(self)
+                    dialog.setWindowTitle("Smart Detect - Select Transaction")
+                    dialog.setMinimumWidth(500)
+                    layout = QVBoxLayout(dialog)
+                    
+                    info_label = QLabel(
+                        f"Found {len(matched_transactions)} potential matches for '{category_name}':\n"
+                        f"Please select the correct transaction:"
+                    )
+                    info_label.setWordWrap(True)
+                    layout.addWidget(info_label)
+                    
+                    button_group = QButtonGroup(dialog)
+                    radio_buttons = []
+                    
+                    for i, txn in enumerate(matched_transactions):
+                        try:
+                            desc = txn['description'] or 'No description'
+                            amt = txn['amount']
+                            date = txn['date']
+                            radio = QRadioButton(f"{desc}\n${amt:.2f} on {date}")
+                            radio.setStyleSheet("""
+                                QRadioButton {
+                                    padding: 10px;
+                                    margin: 5px;
+                                    font-size: 13px;
+                                }
+                                QRadioButton:checked {
+                                    background-color: #E3F2FD;
+                                    border-radius: 4px;
+                                }
+                            """)
+                            button_group.addButton(radio, i)
+                            radio_buttons.append(radio)
+                            layout.addWidget(radio)
+                        except (KeyError, TypeError):
+                            continue
+                    
+                    if not radio_buttons:
+                        QMessageBox.warning(self, "Error", "Could not display transaction options")
+                        return
+                    
+                    # Select first one by default
+                    radio_buttons[0].setChecked(True)
+                    
+                    button_layout = QHBoxLayout()
+                    button_layout.addStretch()
+                    
+                    cancel_btn = QPushButton("Cancel")
+                    cancel_btn.clicked.connect(dialog.reject)
+                    button_layout.addWidget(cancel_btn)
+                    
+                    select_btn = QPushButton("Mark Selected as Paid")
+                    select_btn.setStyleSheet("""
+                        QPushButton {
+                            background-color: #2563EB;
+                            color: white;
+                            padding: 8px 16px;
+                            border-radius: 6px;
+                            font-weight: 600;
+                        }
+                        QPushButton:hover {
+                            background-color: #1D4ED8;
+                        }
+                    """)
+                    select_btn.clicked.connect(dialog.accept)
+                    button_layout.addWidget(select_btn)
+                    
+                    layout.addLayout(button_layout)
+                    
+                    if dialog.exec_() == QDialog.Accepted:
+                        selected_index = button_group.checkedId()
+                        if selected_index >= 0 and selected_index < len(matched_transactions):
+                            selected_txn = matched_transactions[selected_index]
+                            # Mark as paid
+                            self.mark_as_paid(commitment_id, category_name)
+                            # Handle sqlite3.Row object
+                            try:
+                                txn_desc = selected_txn['description'] if 'description' in selected_txn.keys() else 'Transaction'
+                            except:
+                                txn_desc = 'Transaction'
+                            try:
+                                txn_amount = selected_txn['amount'] if 'amount' in selected_txn.keys() else 0
+                            except:
+                                txn_amount = 0
+                            
+                            QMessageBox.information(
+                                self, "Smart Detect",
+                                f"✅ Matched and marked as paid:\n"
+                                f"{txn_desc} - ${txn_amount:.2f}"
+                            )
+                else:
+                    # All results are similar - just confirm
+                    matches_list = []
+                    for txn in matched_transactions[:5]:
+                        try:
+                            desc = txn['description'] if 'description' in txn.keys() else 'No description'
+                        except:
+                            desc = 'No description'
+                        try:
+                            amt = txn['amount'] if 'amount' in txn.keys() else 0
+                        except:
+                            amt = 0
+                        try:
+                            date = txn['date'] if 'date' in txn.keys() else 'Unknown date'
+                        except:
+                            date = 'Unknown date'
+                        matches_list.append(f"• {desc} - ${amt:.2f} on {date}")
+                    matches_text = "\n".join(matches_list)
+                    if len(matched_transactions) > 5:
+                        matches_text += f"\n... and {len(matched_transactions) - 5} more"
+                    
+                    reply = QMessageBox.question(
+                        self, "Smart Detect - Found Matches",
+                        f"Found {len(matched_transactions)} matching transaction(s):\n\n{matches_text}\n\n"
+                        f"Would you like to mark this commitment as paid?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.Yes
+                    )
+                    
+                    if reply == QMessageBox.Yes:
+                        self.mark_as_paid(commitment_id, category_name)
+            else:
+                # No matches found - show recent transactions and let user pick manually
+                # Get last 10 recent transactions for manual selection
+                recent_txns = fetch_all("""
+                    SELECT t.*, c.category_name 
+                    FROM transactions t
+                    LEFT JOIN categories c ON t.category_id = c.category_id
+                    WHERE t.user_id = ? 
+                    AND t.transaction_type = 'expense'
+                    ORDER BY t.date DESC, t.id DESC
+                    LIMIT 10
+                """, (self.user_id,))
+                
+                dialog = QDialog(self)
+                dialog.setWindowTitle("Smart Detect - Manual Selection")
+                dialog.setMinimumWidth(600)
+                layout = QVBoxLayout(dialog)
+                
+                info_label = QLabel(
+                    f"Smart Detect did not work? Pick the transaction that was made manually to mark as paid.\n\n"
+                    f"No automatic matches found for '{category_name}' (${commitment_amount:.2f}).\n"
+                    f"Please select the transaction you made for this commitment:"
+                )
+                info_label.setWordWrap(True)
+                info_label.setStyleSheet("font-size: 14px; padding: 10px;")
+                layout.addWidget(info_label)
+                
+                if recent_txns:
+                    button_group = QButtonGroup(dialog)
+                    radio_buttons = []
+                    
+                    for i, txn in enumerate(recent_txns):
+                        try:
+                            desc = txn['description'] or 'No description'
+                            amt = txn['amount']
+                            date = txn['date']
+                            cat_name = txn.get('category_name', 'No category')
+                            radio = QRadioButton(f"{desc}\n${amt:.2f} on {date} ({cat_name})")
+                            radio.setStyleSheet("""
+                                QRadioButton {
+                                    padding: 10px;
+                                    margin: 5px;
+                                    font-size: 13px;
+                                }
+                                QRadioButton:checked {
+                                    background-color: #E3F2FD;
+                                    border-radius: 4px;
+                                }
+                            """)
+                            button_group.addButton(radio, i)
+                            radio_buttons.append(radio)
+                            layout.addWidget(radio)
+                        except (KeyError, TypeError):
+                            continue
+                    
+                    if radio_buttons:
+                        # Select first one by default
+                        radio_buttons[0].setChecked(True)
+                else:
+                    no_txn_label = QLabel("No recent transactions found. You can mark this commitment as paid manually.")
+                    no_txn_label.setWordWrap(True)
+                    no_txn_label.setStyleSheet("font-size: 13px; color: #6B7280; padding: 10px;")
+                    layout.addWidget(no_txn_label)
+                
+                button_layout = QHBoxLayout()
+                button_layout.addStretch()
+                
+                cancel_btn = QPushButton("Cancel")
+                cancel_btn.clicked.connect(dialog.reject)
+                button_layout.addWidget(cancel_btn)
+                
+                select_btn = QPushButton("Mark Selected as Paid" if recent_txns else "Mark as Paid Manually")
+                select_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #2563EB;
+                        color: white;
+                        padding: 8px 16px;
+                        border-radius: 6px;
+                        font-weight: 600;
+                    }
+                    QPushButton:hover {
+                        background-color: #1D4ED8;
+                    }
+                """)
+                select_btn.clicked.connect(dialog.accept)
+                button_layout.addWidget(select_btn)
+                
+                layout.addLayout(button_layout)
+                
+                if dialog.exec_() == QDialog.Accepted:
+                    if recent_txns:
+                        selected_index = button_group.checkedId()
+                        if selected_index >= 0 and selected_index < len(recent_txns):
+                            selected_txn = recent_txns[selected_index]
+                            # Mark as paid
+                            self.mark_as_paid(commitment_id, category_name)
+                            # Handle sqlite3.Row object
+                            try:
+                                txn_desc = selected_txn['description'] if 'description' in selected_txn.keys() else 'Transaction'
+                            except:
+                                txn_desc = 'Transaction'
+                            try:
+                                txn_amount = selected_txn['amount'] if 'amount' in selected_txn.keys() else 0
+                            except:
+                                txn_amount = 0
+                            
+                            QMessageBox.information(
+                                self, "Smart Detect",
+                                f"✅ Selected transaction marked as paid:\n"
+                                f"{txn_desc} - ${txn_amount:.2f}"
+                            )
+                    else:
+                        # No transactions, just mark as paid manually
+                        self.mark_as_paid(commitment_id, category_name)
+                
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to run Smart Detect: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    def pay_as_you_go(self, commitment_id, category_name, amount):
+        """Navigate to transactions tab and pre-fill form for this commitment"""
+        try:
+            # Get commitment details
+            commitment = fetch_one("""
+                SELECT cc.*, c.category_id
+                FROM category_commitments cc
+                JOIN categories c ON cc.category_id = c.category_id
+                WHERE cc.commitment_id = ? AND cc.user_id = ?
+            """, (commitment_id, self.user_id))
+            
+            if not commitment:
+                QMessageBox.warning(self, "Error", "Commitment not found")
+                return
+            
+            # Navigate to transactions tab and switch to Transactions View (not Simulate)
+            if self.parent_dashboard and hasattr(self.parent_dashboard, 'page_transactions'):
+                self.parent_dashboard.show_transactions()
+                
+                # Switch to Transactions View tab (not Simulate Transactions)
+                if hasattr(self.parent_dashboard.page_transactions, 'show_transaction_form'):
+                    self.parent_dashboard.page_transactions.show_transaction_form()
+                
+                # Get category ID - handle sqlite3.Row
+                try:
+                    cat_id = commitment['category_id']
+                except (KeyError, TypeError):
+                    QMessageBox.warning(self, "Error", "Could not get category information")
+                    return
+                
+                # Get accounts for pre-filling
+                accounts = fetch_all("""
+                    SELECT id, account_id, bank_name, account_type 
+                    FROM accounts WHERE user_id = ? AND (account_type = 'salary' OR account_type = 'checking')
+                    LIMIT 1
+                """, (self.user_id,))
+                
+                if accounts:
+                    account_id = accounts[0]['id']
+                    
+                    # CRITICAL: Set pending_commitment_id so save_txn knows to mark commitment as paid
+                    self.parent_dashboard.page_transactions.pending_commitment_id = commitment_id
+                    
+                    # Pre-fill transaction form
+                    self.parent_dashboard.page_transactions.amount_input.setText(str(amount))
+                    self.parent_dashboard.page_transactions.type_input.setCurrentText("expense")
+                    self.parent_dashboard.page_transactions.note_input.setPlainText(category_name)
+                    
+                    # Set category
+                    cat_index = self.parent_dashboard.page_transactions.cat_input.findData(cat_id)
+                    if cat_index >= 0:
+                        self.parent_dashboard.page_transactions.cat_input.setCurrentIndex(cat_index)
+                    
+                    # Set account
+                    acc_index = self.parent_dashboard.page_transactions.acc_input.findData(account_id)
+                    if acc_index >= 0:
+                        self.parent_dashboard.page_transactions.acc_input.setCurrentIndex(acc_index)
+                else:
+                    QMessageBox.information(
+                        self.parent_dashboard, "Account Needed",
+                        f"Transaction form opened. Please select an account to complete the payment for '{category_name}'."
+                    )
+            else:
+                QMessageBox.warning(self, "Error", "Unable to navigate to transactions tab.")
+                
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to open payment form: {str(e)}")
+            import traceback
+            traceback.print_exc()
+
+    def pay_savings_commitment(self, commitment_id, category_name, amount):
+        """Handle payment for savings commitment - navigate to transactions tab and pre-fill form"""
+        try:
+            # Get checking account (from account) - use 'id' for foreign key reference
+            checking_accounts = fetch_all("""
+                SELECT id, account_id, bank_name, account_type
+                FROM accounts
+                WHERE user_id = ? AND (account_type = 'checking' OR account_type = 'salary')
+                ORDER BY id
+                LIMIT 1
+            """, (self.user_id,))
+            
+            if not checking_accounts:
+                QMessageBox.warning(self, "No Account", "Please link a checking account first.")
+                return
+            
+            checking_account = checking_accounts[0]
+            
+            # Get savings account (to account) - use 'id' for foreign key reference
+            savings_accounts = fetch_all("""
+                SELECT id, account_id, bank_name, account_type
+                FROM accounts
+                WHERE user_id = ? AND account_type = 'savings'
+                ORDER BY id
+                LIMIT 1
+            """, (self.user_id,))
+            
+            if not savings_accounts:
+                QMessageBox.warning(self, "No Savings Account", "Please link a savings account first.")
+                return
+            
+            savings_account = savings_accounts[0]
+            
+            # Get savings category ID
+            savings_category = fetch_one("""
+                SELECT category_id
+                FROM categories
+                WHERE user_id = ? AND LOWER(category_name) = 'savings'
+            """, (self.user_id,))
+            
+            if not savings_category:
+                QMessageBox.warning(self, "No Category", "Savings category not found. Please create it first.")
+                return
+            
+            # Navigate to transactions tab and pre-fill
+            if self.parent_dashboard:
+                self.parent_dashboard.show_transactions()
+                # Get the transaction form and pre-fill it
+                if hasattr(self.parent_dashboard, 'page_transactions'):
+                    # Use Plaid account_id for display purposes (for the "To Account Number" field)
+                    # sqlite3.Row supports dictionary-style access, not .get() method
+                    savings_account_id = savings_account['account_id'] if 'account_id' in savings_account.keys() else ''
+                    # Extract last 4 characters if account_id is long, otherwise use full ID
+                    if savings_account_id and len(str(savings_account_id)) > 4:
+                        account_display = f"****{str(savings_account_id)[-4:]}"
+                    else:
+                        account_display = str(savings_account_id) if savings_account_id else ''
+                    
+                    # Use database 'id' (INTEGER) for the from_account_id foreign key
+                    self.parent_dashboard.page_transactions.prefill_savings_transaction(
+                        amount=amount,
+                        from_account_id=checking_account['id'],  # Use 'id' not 'account_id'
+                        to_account_number=account_display,
+                        category_id=savings_category['category_id']
+                    )
+            else:
+                QMessageBox.warning(self, "Error", "Unable to navigate to transactions.")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to open payment form: {str(e)}")
+
+    def remove_commitment(self,commitment_id):
+        """Remove a commitment"""
+        reply = QMessageBox.question(
+            self,
+            "Remove Commitment",
+            "Are you sure you want to remove this commitment?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            execute_query(
+                "DELETE FROM category_commitments WHERE commitment_id = ? AND user_id = ?",
+                (commitment_id,self.user_id),
+                commit=True
+            )
+            self.load_commitments()
+            # Refresh dashboard metrics to update available balance
+            if self.parent_dashboard:
+                self.parent_dashboard.refresh_dashboard()
+
+    def add_commitment(self):
+        """Open modern commitment selection dialog"""
+        # Get available categories for commitments
+        categories = fetch_all("""
+            SELECT category_id, category_name 
+            FROM categories 
+            WHERE user_id = ? AND category_id NOT IN (
+                SELECT category_id 
+                FROM category_commitments 
+                WHERE user_id = ? AND is_paid = 0
+            )
+        """,(self.user_id,self.user_id))
+
+        if not categories:
+            QMessageBox.information(self,"No Categories",
+                                    "All your categories already have commitments.\nCreate a new category first.")
+            return
+
+        # Show modern commitment form
+        dlg = CommitmentForm(self.user_id, parent_dashboard=self.parent_dashboard)
+        if dlg.exec_():
+            # Commitment is saved in the form itself
+            self.load_commitments()
+            # Refresh dashboard metrics
+            if self.parent_dashboard:
+                self.parent_dashboard.refresh_dashboard()
+            return
+            
+            # Old code below - remove if not needed
+            # Handle the selected commitment
+            if item.get("is_custom", False):
+                # Create custom commitment
+                custom_name = item["name"]
+                amount = item["amount"]
+                
+                # Create category first
+                execute_query("""
+                    INSERT INTO categories (user_id, category_name, color, budget_amount)
+                    VALUES (?, ?, ?, ?)
+                """,(
+                    self.user_id,
+                    custom_name,
+                    self.get_category_color(custom_name.lower()),
+                    amount
+                ),commit=True)
+
+                # Get the new category ID
+                category = fetch_one(
+                    "SELECT category_id FROM categories WHERE category_name = ? AND user_id = ?",
+                    (custom_name,self.user_id)
+                )
+
+                if category:
+                    # Create commitment
+                    from core.commitment_manager import create_commitment
+                    create_commitment(self.user_id,category['category_id'],custom_name,amount)
+                    QMessageBox.information(self,"Commitment Created",
+                                            f"✅ ${amount:,.2f} commitment set for {custom_name}!")
+                    self.load_commitments()
+                    # Refresh dashboard metrics to update available balance
+                    if self.parent_dashboard:
+                        self.parent_dashboard.refresh_dashboard()
+            else:
+                # Quick add common commitment
+                common_name_map = {
+                    "Netflix": "netflix",
+                    "Spotify": "spotify",
+                    "Amazon Prime": "amazon",
+                    "Gym Membership": "gym",
+                    "Internet": "internet",
+                    "Phone Bill": "phone"
+                }
+                
+                commitment_name = item["name"]
+                category_type = common_name_map.get(commitment_name, "other")
+                amount = item["amount"]
+                self.create_quick_commitment(commitment_name, category_type, amount)
+
+    def create_custom_commitment(self):
+        """Fallback method to create custom commitment"""
+        category_name,ok = QInputDialog.getText(
+            self,"Custom Commitment","Enter category name:"
+        )
+
+        if ok and category_name:
+            amount,ok = QInputDialog.getDouble(
+                self,"Monthly Amount",
+                f"Enter monthly amount for {category_name}:",
+                value=50.00,min=1.00,max=1000.00,decimals=2
+            )
+
+            if ok and amount > 0:
+                # Create category first
+                execute_query("""
+                    INSERT INTO categories (user_id, category_name, color, budget_amount)
+                    VALUES (?, ?, ?, ?)
+                """,(
+                    self.user_id,
+                    category_name,
+                    self.get_category_color(category_name.lower()),
+                    amount
+                ),commit=True)
+
+                # Get the new category ID
+                category = fetch_one(
+                    "SELECT category_id FROM categories WHERE category_name = ? AND user_id = ?",
+                    (category_name,self.user_id)
+                )
+
+                if category:
+                    # Create commitment
+                    from core.commitment_manager import create_commitment
+                    create_commitment(self.user_id,category['category_id'],category_name,amount)
+                    QMessageBox.information(self,"Commitment Created",
+                                            f"✅ ${amount} monthly commitment set for {category_name}!")
+                    self.load_commitments()
+                    # Refresh dashboard metrics to update available balance
+                    if self.parent_dashboard:
+                        self.parent_dashboard.refresh_dashboard()
+
+    def create_quick_commitment(self,category_name,category_type,amount):
+        """Quickly create a commitment for common services"""
+        # Check if category exists, if not create it
+        category = fetch_one(
+            "SELECT category_id FROM categories WHERE category_name = ? AND user_id = ?",
+            (category_name,self.user_id)
+        )
+
+        if not category:
+            # Create the category first
+            execute_query("""
+                INSERT INTO categories (user_id, category_name, color, budget_amount)
+                VALUES (?, ?, ?, ?)
+            """,(
+                self.user_id,
+                category_name,
+                self.get_category_color(category_type),
+                amount
+            ),commit=True)
+
+            category = fetch_one(
+                "SELECT category_id FROM categories WHERE category_name = ? AND user_id = ?",
+                (category_name,self.user_id)
+            )
+
+        if category:
+            from core.commitment_manager import create_commitment
+            create_commitment(self.user_id,category['category_id'],category_name,amount)
+            QMessageBox.information(self,"Commitment Created",
+                                    f"✅ ${amount} monthly commitment set for {category_name}!\n\n"
+                                    f"When a transaction matches '{category_name}', it will be automatically marked as paid.")
+            self.load_commitments()
+            # Refresh dashboard metrics to update available balance
+            if self.parent_dashboard:
+                self.parent_dashboard.refresh_dashboard()
+
+    def get_category_color(self,category_type):
+        """Get color for common commitment categories"""
+        colors = {
+            'netflix': '#E50914',
+            'spotify': '#1DB954',
+            'amazon': '#FF9900',
+            'gym': '#8B5CF6',
+            'internet': '#3B82F6',
+            'phone': '#10B981'
+        }
+        return colors.get(category_type,'#6B7280')
+
+    def refresh_commitments(self):
+        """Public method to refresh commitments data"""
+        self.load_commitments()
+        # Also run commitment checks for due dates
+        from core.commitment_manager import check_commitments
+        check_commitments(self.user_id)
+
+    def setup_savings_commitment(self):
+        """Open commitment form for Savings category"""
+        try:
+            from ui.commitment_form import CommitmentForm
+            dlg = CommitmentForm(self.user_id, "Savings")
+            if dlg.exec_():
+                self.load_commitments()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open savings commitment form: {e}")
+
+
+
+
+
+
+class DashboardMain(QMainWindow):
+    """Modern Dashboard with Navigation & Notifications"""
+
+    def __init__(self,user_id,username,show_tutorial=True):
+        super().__init__()
+        self.user_id = user_id
+        self.username = username
+        self.previous_mood = None
+        self.penny_personality = None
+
+        # Initialize database v3 with settings support
+        from database.db_manager import initialize_database_v3
+        initialize_database_v3()
+
+        self.setup_window()
+        self.setup_navigation()
+        self.setup_ui()
+        self.setup_animations()
+
+        # Tutorial system
+        self.tutorial_manager = TutorialManager(self)
+        if show_tutorial:
+            QTimer.singleShot(2000,self.tutorial_manager.start_tutorial)
+
+    def setup_window(self):
+        self.setWindowTitle(f"PennyWise - {self.username}'s Dashboard")
+        self.setMinimumSize(1200,800)
+        self.setStyleSheet("""
+            QMainWindow {
+                background: #F9FAFB;
+            }
+        """)
+
+        # Remove the default title bar
+        self.setWindowFlags(Qt.FramelessWindowHint)
+
+
+
+
+
+    def refresh_dashboard(self):
+        """Refresh dashboard data including commitments"""
+        # Refresh commitments if they exist
+        if hasattr(self,'commitment_tracker'):
+            self.commitment_tracker.refresh_commitments()
+
+        # Refresh metrics carousel if it exists
+        if hasattr(self,'metrics_carousel'):
+            self.metrics_carousel.refresh_data()
+        
+        # Refresh metrics cards
+        if hasattr(self, 'metrics_carousel'):
+            self.metrics_carousel.refresh_metrics_cards()
+        
+        # Refresh recent transactions if on dashboard page
+        if hasattr(self, 'stack') and hasattr(self, 'page_dashboard'):
+            if self.stack.currentWidget() == self.page_dashboard:
+                if hasattr(self, 'recent_transactions_layout'):
+                    self.refresh_recent_transactions()
+    
+    def refresh_metrics_cards_main(self):
+        """Refresh the metrics cards in DashboardMain (not MetricsCarousel)"""
+        if hasattr(self, 'metrics_carousel'):
+            self.metrics_carousel.refresh_metrics_cards()
+
+        # Run commitment checks for due dates
+        from core.commitment_manager import check_commitments
+        check_commitments(self.user_id)
+
+    def update_dashboard(self):
+        """Rebuild the dashboard page to reflect latest data"""
+        # Just call refresh_dashboard for now
+        self.refresh_dashboard()
+        # If on dashboard page, refresh it
+        if hasattr(self, 'stack') and hasattr(self, 'page_dashboard'):
+            if self.stack.currentWidget() == self.page_dashboard:
+                # Force a refresh by rebuilding the page
+                # Get current scroll position if in scroll area
+                self.show_dashboard()
+        
+        # Refresh accounts page to show newly linked accounts
+        self.refresh_accounts_page()
+
+    def logout(self):
+        """Handle logout functionality"""
+        from PyQt5.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "Logout",
+            "Are you sure you want to logout?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            # Close the current dashboard
+            self.close()
+            
+            # Import and show the login window
+            try:
+                from ui.login_window import LoginWindow
+                self.login_window = LoginWindow()
+                self.login_window.show()
+            except ImportError:
+                print("Could not import LoginWindow")
+                # If login window import fails, just close the application
+                from PyQt5.QtWidgets import QApplication
+                QApplication.quit()
+
+    def create_pages(self):
+        """Create all pages for the stacked widget"""
+        # Dashboard page (main content)
+        self.page_dashboard = self.build_dashboard_page()
+        
+        # Transactions page
+        from ui.transaction_form import TransactionForm
+        self.page_transactions = TransactionForm(self.user_id, parent=self)
+        
+        # Accounts page
+        self.page_accounts = self.build_accounts_page()
+        
+        # Reports page
+        from ui.reports_page import ReportsPage
+        self.page_reports = ReportsPage(self.user_id)
+        
+        # Settings page
+        from ui.settings_window import SettingsWindow
+        self.page_settings = SettingsWindow(self.user_id, parent=self)
+        self.page_settings.settings_changed.connect(self.on_settings_changed)
+        
+        # Link Bank page
+        from ui.bank_connect_window import BankConnectWindow
+        self.page_bank = BankConnectWindow(self.user_id, self)
+        
+        # Add all pages to stack
+        self.stack.addWidget(self.page_dashboard)
+        self.stack.addWidget(self.page_transactions)
+        self.stack.addWidget(self.page_accounts)
+        self.stack.addWidget(self.page_reports)
+        self.stack.addWidget(self.page_settings)
+        self.stack.addWidget(self.page_bank)
+        
+        # Set dashboard as default
+        self.stack.setCurrentWidget(self.page_dashboard)
+
+    def build_dashboard_page(self):
+        """Build the main dashboard page"""
+        content_container = QWidget()
+        content_container.setStyleSheet("background: #f9f7f5;")
+        content_layout = QVBoxLayout(content_container)
+        
+        # Content padding
+        content_layout.setContentsMargins(30, 5, 30, 30)
+        content_layout.setSpacing(5)
+        
+        # Add content sections
+        self.setup_header(content_layout)
+        
+        spacer = QSpacerItem(1, 1, QSizePolicy.Minimum, QSizePolicy.Fixed)
+        content_layout.addItem(spacer)
+        
+        self.setup_metrics_carousel(content_layout)
+        
+        # --- Monthly Commitments Section ---
+        commitment_title = QLabel(" Monthly Commitments")
+        commitment_title.setFont(QFont("Segoe UI",18,QFont.Bold))
+        commitment_title.setStyleSheet("color: #1F2937; margin-top: 15px;")
+        content_layout.addWidget(commitment_title)
+        
+        try:
+            self.commitment_tracker = CommitmentTrackerWidget(self.user_id, parent=self)
+            content_layout.addWidget(self.commitment_tracker)
+        except Exception as e:
+            error_widget = QLabel(f"Error loading commitments: {str(e)}")
+            error_widget.setStyleSheet("background: yellow; color: red; padding: 20px; border: 2px solid red;")
+            content_layout.addWidget(error_widget)
+        # --- End Monthly Commitments Section ---
+
+        self.setup_main_content(content_layout)
+
+        # Create scroll area for content
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll.setWidget(content_container)
+        
+        return scroll
+
+    def build_accounts_page(self):
+        """Build the accounts page with flat list of accounts (no sub-accounts)"""
+        from PyQt5.QtWidgets import (
+            QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, 
+            QFrame, QPushButton, QMessageBox, QMenu
+        )
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtGui import QFont, QColor
+        from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+        from core.logger import logger
+        import qtawesome as qta
+        from database.migrations.add_institution_migration import apply_institution_migration
+        apply_institution_migration()
+        
+        # Import PennyWise colors
+        from assets.styles.penny_colors import PennyColors
+        
+        page = QWidget()
+        page.setStyleSheet(f"background: {PennyColors.BACKGROUND};")
+        main_layout = QVBoxLayout(page)
+        main_layout.setContentsMargins(24, 16, 24, 24)
+        main_layout.setSpacing(16)
+        
+        # Header
+        header_layout = QHBoxLayout()
+        title = QLabel("Accounts")
+        title.setFont(QFont("Segoe UI", 28, QFont.Bold))
+        title.setStyleSheet(f"color: {PennyColors.TEXT_PRIMARY}; padding: 0; margin: 0;")
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+        
+        # Link Bank button
+        link_btn = QPushButton("+ Link Account")
+        link_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #d6733a, stop:1 #b45131);
+                color: white;
+                padding: 8px 12px;
+                border-radius: 10px;
+                font-weight: 600;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #e6824a, stop:1 #c56141);
+            }}
+            QPushButton:pressed {{
+                background: #b45131;
+            }}
+        """)
+        link_btn.clicked.connect(lambda: self.show_link_bank())
+        header_layout.addWidget(link_btn)
+        
+        main_layout.addLayout(header_layout)
+        
+        # Info label
+        info_label = QLabel("Click an account to manage it. Set as Listings Account or Savings Account.")
+        info_label.setStyleSheet(f"color: {PennyColors.TEXT_SECONDARY}; font-size: 12px; padding: 4px 0 8px 0;")
+        main_layout.addWidget(info_label)
+        
+        # Scroll area for accounts
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"QScrollArea {{ border: none; background: {PennyColors.BACKGROUND}; }}")
+        
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet(f"background: {PennyColors.BACKGROUND};")
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(12)
+        
+        # Get all accounts - only main plaid accounts (checking), exclude business/savings sub-accounts
+        # We only show accounts that are linked to pennywise (listings or savings)
+        try:
+            accounts = fetch_all("""
+                SELECT id, account_id, bank_name, account_type, institution_name, institution_logo,
+                       is_primary, plaid_token
+                FROM accounts 
+                WHERE user_id = ? AND plaid_token IS NOT NULL
+                AND (account_type = 'salary' OR (account_type = 'savings' AND is_primary = 1))
+                ORDER BY 
+                    CASE WHEN account_type = 'salary' AND is_primary = 1 THEN 1
+                         WHEN account_type = 'savings' AND is_primary = 1 THEN 2
+                         ELSE 3 END,
+                    COALESCE(institution_name, bank_name)
+            """, (self.user_id,))
+        except Exception as e:
+            # Fallback query without institution_logo if column doesn't exist yet
+            logger.warning(f"institution_logo column not found, using fallback query: {e}")
+            accounts = fetch_all("""
+                SELECT id, account_id, bank_name, account_type, institution_name,
+                       is_primary, plaid_token
+                FROM accounts 
+                WHERE user_id = ? AND plaid_token IS NOT NULL
+                AND (account_type = 'salary' OR (account_type = 'savings' AND is_primary = 1))
+                ORDER BY 
+                    CASE WHEN account_type = 'salary' AND is_primary = 1 THEN 1
+                         WHEN account_type = 'savings' AND is_primary = 1 THEN 2
+                         ELSE 3 END,
+                    COALESCE(institution_name, bank_name)
+            """, (self.user_id,))
+            # Add None for institution_logo for each account to match expected structure
+            if accounts:
+                accounts = [dict(acc) if hasattr(acc, 'keys') else acc for acc in accounts]
+                for acc in accounts:
+                    if isinstance(acc, dict) and 'institution_logo' not in acc:
+                        acc['institution_logo'] = None
+        
+        # Get active accounts
+        active_checking = fetch_one("""
+            SELECT account_id FROM accounts 
+            WHERE user_id = ? AND account_type = 'salary' AND is_primary = 1
+            LIMIT 1
+        """, (self.user_id,))
+        
+        active_savings = fetch_one("""
+            SELECT account_id FROM accounts 
+            WHERE user_id = ? AND account_type = 'savings' AND is_primary = 1
+            LIMIT 1
+        """, (self.user_id,))
+        
+        active_checking_id = active_checking['account_id'] if active_checking and 'account_id' in active_checking.keys() else None
+        active_savings_id = active_savings['account_id'] if active_savings and 'account_id' in active_savings.keys() else None
+        
+        if not accounts:
+            # Empty state
+            empty_container = QWidget()
+            empty_layout = QVBoxLayout(empty_container)
+            empty_layout.setAlignment(Qt.AlignCenter)
+            
+            no_accounts_icon = QLabel()
+            try:
+                no_accounts_icon.setPixmap(qta.icon('fa5s.university', color=PennyColors.TEXT_SECONDARY).pixmap(64, 64))
+            except:
+                no_accounts_icon.setText("🏦")
+                no_accounts_icon.setStyleSheet("font-size: 48px;")
+            no_accounts_icon.setAlignment(Qt.AlignCenter)
+            empty_layout.addWidget(no_accounts_icon)
+            
+            no_accounts = QLabel("No accounts linked yet")
+            no_accounts.setAlignment(Qt.AlignCenter)
+            no_accounts.setStyleSheet(f"""
+                color: {PennyColors.TEXT_PRIMARY};
+                font-size: 16px;
+                font-weight: 600;
+                padding: 12px 0 4px 0;
+            """)
+            empty_layout.addWidget(no_accounts)
+            
+            no_accounts_sub = QLabel("Link your first bank account to get started")
+            no_accounts_sub.setAlignment(Qt.AlignCenter)
+            no_accounts_sub.setStyleSheet(f"""
+                color: {PennyColors.TEXT_SECONDARY};
+                font-size: 14px;
+                padding: 0 0 24px 0;
+            """)
+            empty_layout.addWidget(no_accounts_sub)
+            
+            scroll_layout.addWidget(empty_container)
+        else:
+            # Display each account as a card
+            for acc in accounts:
+                try:
+                    account_card = self.create_account_card(
+                        acc, active_checking_id, active_savings_id, scroll_layout
+                    )
+                except Exception as e:
+                    logger.error(f"Error displaying account: {e}")
+                    import traceback
+                    traceback.print_exc()
+        
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        main_layout.addWidget(scroll)
+        
+        return page
+
+    def create_account_card(self, acc, active_checking_id, active_savings_id, parent_layout):
+        """Create account card with logo, name, and status"""
+        from PyQt5.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QMenu
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtGui import QFont, QColor
+        from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+        from assets.styles.penny_colors import PennyColors
+        import qtawesome as qta
+        
+        account_id = acc['account_id'] if 'account_id' in acc.keys() else acc.get('id') if hasattr(acc, 'get') else None
+        bank_name = acc['bank_name'] if 'bank_name' in acc.keys() else 'Unknown Account'
+        
+        # Handle sqlite3.Row object - use bracket notation or check with 'in'
+        # Use institution_name if available, otherwise extract from bank_name
+        display_name = None
+        if 'institution_name' in acc.keys() and acc['institution_name']:
+            display_name = acc['institution_name']
+        
+        # If no institution_name, try to extract from bank_name
+        # Account names are like "Tartan Bank Checking", "First Gingham Credit Union Checking", "Plaid Checking"
+        if not display_name and bank_name:
+            # Remove "Plaid" prefix if present
+            cleaned = bank_name.replace("Plaid", "").strip()
+            # Remove account type words (Checking, Savings, etc.)
+            account_types = ["Checking", "Savings", "Credit", "Card", "Loan", "checking", "savings", "credit", "card", "loan"]
+            parts = cleaned.split()
+            filtered_parts = [p for p in parts if p not in account_types]
+            if filtered_parts:
+                display_name = " ".join(filtered_parts)
+            elif cleaned:
+                display_name = cleaned
+            else:
+                display_name = "Bank"
+        
+        if not display_name:
+            display_name = "Bank"
+        
+        # Get institution logo URL
+        institution_logo_url = None
+        if 'institution_logo' in acc.keys() and acc['institution_logo']:
+            institution_logo_url = acc['institution_logo']
+        
+        # Also try to fetch institution info if we have institution_id but no name/logo
+        if (not display_name or display_name == "Bank" or not institution_logo_url) and 'institution_id' in acc.keys() and acc['institution_id']:
+            try:
+                from core.plaid_api import get_institution_by_id
+                institution_data = get_institution_by_id(acc['institution_id'])
+                if "institution" in institution_data and "error" not in institution_data:
+                    institution = institution_data["institution"]
+                    if not display_name or display_name == "Bank":
+                        display_name = institution.get("name", display_name)
+                    if not institution_logo_url:
+                        institution_logo_url = institution.get("logo", None) or institution.get("icon", None)
+            except Exception as e:
+                logger.warning(f"Failed to fetch institution details: {e}")
+        
+        # Determine if this is active checking or savings
+        is_active_checking = (account_id == active_checking_id)
+        is_active_savings = (account_id == active_savings_id)
+        is_active = is_active_checking or is_active_savings
+        
+        # Account card
+        account_card = QFrame()
+        
+        # Highlight active accounts with different colors
+        if is_active_checking:
+            border_color = PennyColors.ACCENT  # Orange for main/checking
+            bg_color = f"rgba(245, 158, 11, 0.05)"
+        elif is_active_savings:
+            border_color = PennyColors.SUCCESS  # Green for savings
+            bg_color = f"rgba(34, 197, 94, 0.05)"
+        else:
+            border_color = "#E5E7EB"
+            bg_color = PennyColors.SURFACE
+        
+        account_card.setStyleSheet(f"""
+            QFrame {{
+                background: {bg_color};
+                border: 2px solid {border_color};
+                border-radius: 12px;
+                padding: 16px;
+                cursor: pointer;
+            }}
+            QFrame:hover {{
+                border-color: {border_color if is_active else '#d6733a'};
+                background: {bg_color if is_active else 'rgba(214, 115, 58, 0.05)'};
+            }}
+        """)
+        
+        # Make card clickable to redirect to link accounts tab
+        def card_clicked(event):
+            self.show_link_bank()
+        
+        account_card.mousePressEvent = card_clicked
+        account_card.setCursor(Qt.PointingHandCursor)
+        
+        # Subtle shadow
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(8)
+        shadow.setXOffset(0)
+        shadow.setYOffset(2)
+        shadow.setColor(QColor(0, 0, 0, 15))
+        account_card.setGraphicsEffect(shadow)
+        
+        account_layout = QHBoxLayout(account_card)
+        account_layout.setContentsMargins(16, 16, 16, 16)
+        account_layout.setSpacing(16)
+        
+        # Bank logo (icon) - left side
+        logo_label = QLabel()
+        logo_label.setFixedSize(40, 40)
+        logo_bg_color = 'rgba(214, 115, 58, 0.1)' if is_active else 'rgba(107, 114, 128, 0.1)'
+        logo_text_color = PennyColors.ACCENT if is_active else PennyColors.TEXT_SECONDARY
+        
+        # Try to load logo from URL if available
+        logo_loaded = False
+        if institution_logo_url:
+            try:
+                import requests
+                from PyQt5.QtGui import QPixmap
+                
+                # Use requests to download the image
+                response = requests.get(institution_logo_url, timeout=5)
+                if response.status_code == 200:
+                    pixmap = QPixmap()
+                    pixmap.loadFromData(response.content)
+                    if not pixmap.isNull():
+                        scaled_pixmap = pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                        logo_label.setPixmap(scaled_pixmap)
+                        logo_label.setStyleSheet(f"background: {logo_bg_color}; border-radius: 8px; padding: 4px;")
+                        logo_loaded = True
+                        logger.info(f"Successfully loaded logo from {institution_logo_url}")
+            except Exception as e:
+                logger.warning(f"Failed to load logo from URL {institution_logo_url}: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Fallback to icon if logo not loaded
+        if not logo_loaded:
+            try:
+                # Try to use a bank icon
+                logo_icon = qta.icon('fa5s.university', color=logo_text_color)
+                logo_label.setPixmap(logo_icon.pixmap(40, 40))
+                logo_label.setStyleSheet(f"background: {logo_bg_color}; border-radius: 8px;")
+            except:
+                logo_label.setText("🏦")
+                logo_label.setStyleSheet(f"font-size: 32px; color: {logo_text_color}; background: {logo_bg_color}; border-radius: 8px;")
+        
+        logo_label.setAlignment(Qt.AlignCenter)
+        account_layout.addWidget(logo_label)
+        
+        # Account name and number (middle) - use VBox for name and account number
+        name_container = QWidget()
+        name_layout = QVBoxLayout(name_container)
+        name_layout.setContentsMargins(0, 0, 0, 0)
+        name_layout.setSpacing(4)
+        
+        # Bank name - no box, just text
+        account_name_label = QLabel(display_name)
+        account_name_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        account_name_label.setStyleSheet(f"""
+            color: {PennyColors.TEXT_PRIMARY};
+            background: transparent;
+            border: none;
+            padding: 0;
+        """)
+        name_layout.addWidget(account_name_label)
+        
+        # Account number (account_id) - small, light font
+        account_number_label = QLabel(account_id if account_id else "")
+        account_number_label.setFont(QFont("Segoe UI", 11))
+        account_number_label.setStyleSheet(f"""
+            color: {PennyColors.TEXT_SECONDARY};
+            background: transparent;
+            border: none;
+            padding: 0;
+            font-weight: normal;
+        """)
+        name_layout.addWidget(account_number_label)
+        
+        account_layout.addWidget(name_container)
+        account_layout.addStretch()
+        
+        # Active status badge (right side)
+        if is_active_checking:
+            status_badge = QLabel("Current Listings Account")
+            status_badge.setStyleSheet(f"""
+                background: {PennyColors.ACCENT};
+                color: white;
+                padding: 6px 12px;
+                border-radius: 8px;
+                font-size: 12px;
+                font-weight: 600;
+            """)
+            account_layout.addWidget(status_badge)
+        elif is_active_savings:
+            status_badge = QLabel("Current Savings Account")
+            status_badge.setStyleSheet(f"""
+                background: {PennyColors.SUCCESS};
+                color: white;
+                padding: 6px 12px;
+                border-radius: 8px;
+                font-size: 12px;
+                font-weight: 600;
+            """)
+            account_layout.addWidget(status_badge)
+        else:
+            status_badge = QLabel("Not Active")
+            status_badge.setStyleSheet(f"""
+                background: #E5E7EB;
+                color: #6B7280;
+                padding: 6px 12px;
+                border-radius: 8px;
+                font-size: 12px;
+                font-weight: 600;
+            """)
+            account_layout.addWidget(status_badge)
+        
+        # Menu button (three dots)
+        menu_btn = QPushButton()
+        menu_btn.setFixedSize(32, 32)
+        try:
+            menu_icon = qta.icon('fa5s.ellipsis-v', color=PennyColors.TEXT_SECONDARY)
+            menu_btn.setIcon(menu_icon)
+        except:
+            menu_btn.setText("⋯")
+        menu_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: none;
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{
+                background: rgba(107, 114, 128, 0.1);
+            }}
+        """)
+        
+        # Create context menu
+        def show_menu(pos):
+            menu = QMenu()
+            
+            # Set as Listings Account (if not already)
+            if not is_active_checking:
+                set_main_action = menu.addAction("Set as Listings Account")
+                def make_set_main_handler(acc_id):
+                    def handler():
+                        self.set_as_main_account(acc_id)
+                    return handler
+                set_main_action.triggered.connect(make_set_main_handler(account_id))
+            
+            # Set as Savings Account (if not already)
+            if not is_active_savings:
+                set_savings_action = menu.addAction("Set as Savings Account")
+                def make_set_savings_handler(acc_id):
+                    def handler():
+                        self.set_as_savings_account(acc_id)
+                    return handler
+                set_savings_action.triggered.connect(make_set_savings_handler(account_id))
+            
+            menu.addSeparator()
+            
+            # Remove account (QAction doesn't support setStyleSheet, so we'll use a styled widget)
+            remove_action = menu.addAction("Remove Account")
+            def make_remove_handler(acc_id):
+                def handler():
+                    self.remove_account(acc_id)
+                return handler
+            remove_action.triggered.connect(make_remove_handler(account_id))
+            
+            # Style the menu to make remove action red
+            menu.setStyleSheet("""
+                QMenu::item:selected {
+                    background-color: rgba(220, 38, 38, 0.1);
+                }
+                QMenu::item {
+                    padding: 8px 20px;
+                }
+            """)
+            
+            # Show menu at button position
+            global_pos = menu_btn.mapToGlobal(menu_btn.rect().bottomLeft())
+            menu.exec_(global_pos)
+        
+        menu_btn.clicked.connect(show_menu)
+        account_layout.addWidget(menu_btn)
+        
+        parent_layout.addWidget(account_card)
+        
+        return account_card
+
+    def set_as_main_account(self, account_id):
+        """Set an account as the main checking account"""
+        try:
+            from database.migrations.add_institution_migration import apply_institution_migration
+            apply_institution_migration()
+            
+            # First, unset all primary salary accounts
+            execute_query("""
+                UPDATE accounts 
+                SET is_primary = 0 
+                WHERE user_id = ? AND account_type = 'salary'
+            """, (self.user_id,), commit=False)
+            
+            # Set this account as primary and ensure it's salary type
+            execute_query("""
+                UPDATE accounts 
+                SET is_primary = 1, account_type = 'salary'
+                WHERE account_id = ? AND user_id = ?
+            """, (account_id, self.user_id), commit=True)
+            
+            # Refresh dashboard
+            self.refresh_dashboard()
+            self.refresh_metrics_cards_main()
+            if hasattr(self, 'metrics_carousel'):
+                self.metrics_carousel.refresh_metrics_cards()
+            # Also refresh the DashboardMain metrics cards
+            if hasattr(self, 'setup_metrics_carousel'):
+                # Force refresh by calling show_dashboard which rebuilds the page
+                QTimer.singleShot(200, lambda: self.show_dashboard())
+            
+            # Refresh accounts page
+            QTimer.singleShot(100, self.refresh_accounts_page)
+            
+            QMessageBox.information(self, "Success", "Listings account updated!")
+            
+        except Exception as e:
+            logger.error(f"Error setting main account: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to set main account: {str(e)}")
+
+    def set_as_savings_account(self, account_id):
+        """Set an account as the savings account"""
+        try:
+            from database.migrations.add_institution_migration import apply_institution_migration
+            apply_institution_migration()
+            
+            # First, unset all primary savings accounts
+            execute_query("""
+                UPDATE accounts 
+                SET is_primary = 0 
+                WHERE user_id = ? AND account_type = 'savings'
+            """, (self.user_id,), commit=False)
+            
+            # Set this account as primary and ensure it's savings type
+            execute_query("""
+                UPDATE accounts 
+                SET is_primary = 1, account_type = 'savings'
+                WHERE account_id = ? AND user_id = ?
+            """, (account_id, self.user_id), commit=True)
+            
+            # Refresh dashboard
+            self.refresh_dashboard()
+            self.refresh_metrics_cards_main()
+            if hasattr(self, 'metrics_carousel'):
+                self.metrics_carousel.refresh_metrics_cards()
+            # Also refresh the DashboardMain metrics cards
+            if hasattr(self, 'setup_metrics_carousel'):
+                # Force refresh by calling show_dashboard which rebuilds the page
+                QTimer.singleShot(200, lambda: self.show_dashboard())
+            
+            # Refresh accounts page
+            QTimer.singleShot(100, self.refresh_accounts_page)
+            
+            QMessageBox.information(self, "Success", "Savings account updated!")
+            
+        except Exception as e:
+            logger.error(f"Error setting savings account: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to set savings account: {str(e)}")
+
+    def remove_account(self, account_id):
+        """Remove an account"""
+        reply = QMessageBox.question(
+            self,
+            "Remove Account",
+            "Are you sure you want to remove this account? This action cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            try:
+                execute_query("""
+                    DELETE FROM accounts 
+                    WHERE account_id = ? AND user_id = ?
+                """, (account_id, self.user_id), commit=True)
+                
+                # Refresh dashboard and accounts page
+                self.refresh_dashboard()
+                self.refresh_metrics_cards_main()
+                if hasattr(self, 'metrics_carousel'):
+                    self.metrics_carousel.refresh_metrics_cards()
+                QTimer.singleShot(100, self.refresh_accounts_page)
+                
+                QMessageBox.information(self, "Success", "Account removed successfully!")
+                
+            except Exception as e:
+                logger.error(f"Error removing account: {e}")
+                QMessageBox.warning(self, "Error", f"Failed to remove account: {str(e)}")
+
+    def create_collapsible_institution(self, inst_name, inst_id, plaid_token, parent_layout, expanded_institution):
+        """Create a collapsible institution widget with accounts"""
+        from PyQt5.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel, QPushButton
+        from PyQt5.QtCore import QPropertyAnimation, QEasingCurve, QSize
+        from PyQt5.QtGui import QFont, QColor
+        from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+        from assets.styles.penny_colors import PennyColors
+        import qtawesome as qta
+        
+        # Get all accounts for this institution (no balance fetching needed)
+        accounts = fetch_all("""
+            SELECT id, account_id, bank_name, account_type, 
+                   is_primary, plaid_token
+            FROM accounts 
+            WHERE user_id = ? AND plaid_token = ?
+            ORDER BY is_primary DESC, account_type, bank_name
+        """, (self.user_id, plaid_token))
+        
+        if not accounts:
+            return None
+        
+        # Main institution card
+        inst_card = QFrame()
+        inst_card.setStyleSheet(f"""
+            QFrame {{
+                background: {PennyColors.SURFACE};
+                border: 1px solid #E5E7EB;
+                border-radius: 12px;
+                padding: 0px;
+            }}
+        """)
+        
+        # Subtle shadow
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(8)
+        shadow.setXOffset(0)
+        shadow.setYOffset(2)
+        shadow.setColor(QColor(0, 0, 0, 15))
+        inst_card.setGraphicsEffect(shadow)
+        
+        main_layout = QVBoxLayout(inst_card)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Institution header (clickable)
+        header = QFrame()
+        header.setStyleSheet(f"""
+            QFrame {{
+                background: {PennyColors.SURFACE};
+                border-radius: 12px;
+                padding: 12px 16px;
+            }}
+        """)
+        header.setCursor(Qt.PointingHandCursor)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(12, 12, 12, 12)
+        header_layout.setSpacing(12)
+        
+        # Chevron icon (smaller, 28px)
+        chevron_label = QLabel()
+        chevron_label.setFixedSize(28, 28)
+        try:
+            chevron_icon = qta.icon('fa5s.chevron-down', color=PennyColors.ACCENT)
+            chevron_label.setPixmap(chevron_icon.pixmap(28, 28))
+        except:
+            chevron_label.setText("▼")
+            chevron_label.setStyleSheet(f"color: {PennyColors.ACCENT}; font-size: 16px;")
+        chevron_label.setAlignment(Qt.AlignCenter)
+        
+        # Bank name (16px bold)
+        bank_name_label = QLabel(inst_name)
+        bank_name_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        bank_name_label.setStyleSheet(f"color: {PennyColors.TEXT_PRIMARY};")
+        
+        header_layout.addWidget(chevron_label)
+        header_layout.addWidget(bank_name_label)
+        header_layout.addStretch()
+        
+        # Account count badge
+        account_count = len(accounts)
+        count_label = QLabel(f"{account_count} account{'s' if account_count != 1 else ''}")
+        count_label.setStyleSheet(f"""
+            color: {PennyColors.TEXT_SECONDARY};
+            font-size: 12px;
+            padding: 4px 8px;
+            background: rgba(107, 114, 128, 0.1);
+            border-radius: 6px;
+        """)
+        header_layout.addWidget(count_label)
+        
+        # Accounts container (initially hidden)
+        accounts_container = QFrame()
+        accounts_container.setStyleSheet("background: transparent;")
+        accounts_layout = QVBoxLayout(accounts_container)
+        accounts_layout.setContentsMargins(16, 8, 16, 12)
+        accounts_layout.setSpacing(8)
+        accounts_container.hide()
+        
+        # Add accounts
+        for acc in accounts:
+            account_id = acc['account_id'] if 'account_id' in acc.keys() else acc.get('id')
+            bank_name = acc['bank_name'] if 'bank_name' in acc.keys() else 'Unknown Account'
+            account_type = acc['account_type'] if 'account_type' in acc.keys() else 'salary'
+            is_primary = acc['is_primary'] if 'is_primary' in acc.keys() else 0
+            
+            # Account card
+            account_card = QFrame()
+            account_card.setStyleSheet(f"""
+                QFrame {{
+                    background: {PennyColors.BACKGROUND};
+                    border: 1px solid #E5E7EB;
+                    border-radius: 10px;
+                    padding: 12px;
+                }}
+            """)
+            account_layout = QVBoxLayout(account_card)
+            account_layout.setContentsMargins(12, 12, 12, 12)
+            account_layout.setSpacing(8)
+            
+            # Account header row
+            account_header = QHBoxLayout()
+            account_header.setSpacing(8)
+            
+            # Account name (13px bold)
+            account_name_label = QLabel(bank_name)
+            account_name_label.setFont(QFont("Segoe UI", 13, QFont.Bold))
+            account_name_label.setStyleSheet(f"color: {PennyColors.TEXT_PRIMARY};")
+            account_header.addWidget(account_name_label)
+            account_header.addStretch()
+            
+            # Primary badge (if primary)
+            if is_primary:
+                primary_badge = QLabel("Primary")
+                primary_badge.setStyleSheet(f"""
+                    background: {PennyColors.ACCENT};
+                    color: white;
+                    padding: 4px 8px;
+                    border-radius: 6px;
+                    font-size: 11px;
+                    font-weight: 600;
+                """)
+                account_header.addWidget(primary_badge)
+            
+            account_layout.addLayout(account_header)
+            
+            # Account type label
+            type_layout = QHBoxLayout()
+            type_layout.setSpacing(12)
+            type_layout.addStretch()
+            
+            type_label = QLabel(account_type.title())
+            type_label.setStyleSheet(f"""
+                color: {PennyColors.TEXT_SECONDARY};
+                font-size: 12px;
+            """)
+            type_layout.addWidget(type_label)
+            
+            account_layout.addLayout(type_layout)
+            
+            # Set primary button (if not already primary)
+            if not is_primary:
+                set_primary_btn = QPushButton("Set as Primary")
+                set_primary_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: transparent;
+                        color: {PennyColors.ACCENT};
+                        border: 1px solid {PennyColors.ACCENT};
+                        border-radius: 8px;
+                        padding: 6px 12px;
+                        font-size: 12px;
+                        font-weight: 500;
+                    }}
+                    QPushButton:hover {{
+                        background: rgba(245, 158, 11, 0.1);
+                    }}
+                """)
+                
+                # Lambda closure fix - capture account_id in a default parameter
+                def make_set_primary_handler(acc_id):
+                    def handler():
+                        self.set_primary_account(acc_id, plaid_token)
+                    return handler
+                
+                set_primary_btn.clicked.connect(make_set_primary_handler(account_id))
+                account_layout.addWidget(set_primary_btn)
+            
+            accounts_layout.addWidget(account_card)
+        
+        main_layout.addWidget(header)
+        main_layout.addWidget(accounts_container)
+        
+        # Store references for accordion behavior
+        accounts_container._inst_card = inst_card
+        accounts_container._chevron_label = chevron_label
+        
+        # Toggle functionality with accordion behavior
+        def toggle_expand():
+            is_expanded = accounts_container.isVisible()
+            if is_expanded:
+                # Collapse this institution
+                accounts_container.hide()
+                if accounts_container in expanded_institution:
+                    expanded_institution.remove(accounts_container)
+                try:
+                    chevron_icon = qta.icon('fa5s.chevron-down', color=PennyColors.ACCENT)
+                    chevron_label.setPixmap(chevron_icon.pixmap(28, 28))
+                except:
+                    chevron_label.setText("▼")
+            else:
+                # Close other expanded institutions (accordion behavior)
+                # Find all other institution cards and collapse them
+                scroll_widget = parent_layout.parentWidget()
+                if scroll_widget:
+                    for other_card in scroll_widget.findChildren(QFrame):
+                        if other_card != inst_card and hasattr(other_card, 'layout'):
+                            # Check if this card has an accounts container
+                            for i in range(other_card.layout().count()):
+                                item = other_card.layout().itemAt(i)
+                                if item and item.widget():
+                                    widget = item.widget()
+                                    if widget == accounts_container:
+                                        continue
+                                    if isinstance(widget, QFrame) and widget.isVisible():
+                                        # This is another expanded container, collapse it
+                                        widget.hide()
+                                        # Find its chevron and reset it
+                                        for child in other_card.findChildren(QLabel):
+                                            if child.fixedSize().width() == 28 and child.fixedSize().height() == 28:
+                                                try:
+                                                    chev_icon = qta.icon('fa5s.chevron-down', color=PennyColors.ACCENT)
+                                                    child.setPixmap(chev_icon.pixmap(28, 28))
+                                                except:
+                                                    child.setText("▼")
+                                                break
+                                        break
+                
+                expanded_institution.clear()
+                expanded_institution.append(accounts_container)
+                
+                accounts_container.show()
+                try:
+                    chevron_icon = qta.icon('fa5s.chevron-up', color=PennyColors.ACCENT)
+                    chevron_label.setPixmap(chevron_icon.pixmap(28, 28))
+                except:
+                    chevron_label.setText("▲")
+        
+        header.mousePressEvent = lambda e: toggle_expand() if e.button() == Qt.LeftButton else None
+        
+        parent_layout.addWidget(inst_card)
+        
+        return inst_card
+
+    def set_primary_account(self, account_id, plaid_token):
+        """Set an account as primary for dashboard balance"""
+        try:
+            # Ensure migration is applied
+            from database.migrations.add_institution_migration import apply_institution_migration
+            apply_institution_migration()
+            
+            # First, unset all primary accounts for this user
+            execute_query("""
+                UPDATE accounts 
+                SET is_primary = 0 
+                WHERE user_id = ?
+            """, (self.user_id,), commit=False)
+            
+            # Set the selected account as primary
+            execute_query("""
+                UPDATE accounts 
+                SET is_primary = 1 
+                WHERE account_id = ? AND user_id = ?
+            """, (account_id, self.user_id), commit=True)
+            
+            # Refresh dashboard to show new balance
+            self.refresh_dashboard()
+            self.refresh_metrics_cards_main()
+            if hasattr(self, 'metrics_carousel'):
+                self.metrics_carousel.refresh_metrics_cards()
+            
+            # Refresh accounts page to show updated primary badge
+            QTimer.singleShot(100, self.refresh_accounts_page)
+            
+            QMessageBox.information(self, "Success", "Primary account updated! Dashboard balance will reflect this account.")
+            
+        except Exception as e:
+            logger.error(f"Error setting primary account: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to set primary account: {str(e)}")
+
+    def refresh_accounts_page(self):
+        """Refresh the accounts page by rebuilding it"""
+        print(f"[DEBUG] refresh_accounts_page called for user_id: {self.user_id}")
+        if not hasattr(self, 'stack') or not hasattr(self, 'page_accounts'):
+            print("[DEBUG] Missing stack or page_accounts - cannot refresh")
+            return
+        
+        # Find the index of the accounts page in the stack
+        accounts_index = self.stack.indexOf(self.page_accounts)
+        if accounts_index == -1:
+            print("[DEBUG] Accounts page not found in stack")
+            return
+        
+        print(f"[DEBUG] Found accounts page at index {accounts_index}, rebuilding...")
+        
+        # Check if we're currently viewing the accounts page
+        was_viewing_accounts = self.stack.currentWidget() == self.page_accounts
+        print(f"[DEBUG] Currently viewing accounts page: {was_viewing_accounts}")
+        
+        # Remove the old accounts page from the stack
+        old_page = self.stack.widget(accounts_index)
+        self.stack.removeWidget(old_page)
+        if old_page:
+            old_page.deleteLater()
+        
+        # Build a new accounts page
+        print(f"[DEBUG] Building new accounts page for user_id: {self.user_id}")
+        self.page_accounts = self.build_accounts_page()
+        
+        # Insert the new page at the same index
+        self.stack.insertWidget(accounts_index, self.page_accounts)
+        print(f"[DEBUG] New accounts page inserted at index {accounts_index}")
+        
+        # If we were viewing the accounts page, show it again
+        if was_viewing_accounts:
+            self.stack.setCurrentWidget(self.page_accounts)
+            print("[DEBUG] Switched back to accounts page")
+        
+        # Force a refresh even if not currently viewing (so it's ready when user navigates to it)
+        print("[DEBUG] Accounts page refresh complete")
+
+    def show_dashboard(self):
+        """Show dashboard view"""
+        self.stack.setCurrentWidget(self.page_dashboard)
+        self.highlight_nav("Dashboard")
+
+    def show_transactions(self):
+        """Show transactions view"""
+        self.stack.setCurrentWidget(self.page_transactions)
+        self.highlight_nav("Transactions")
+
+    def show_accounts(self):
+        """Show accounts view"""
+        print(f"[DEBUG] show_accounts() called - refreshing accounts page for user {self.user_id}")
+        # Refresh accounts page before showing to ensure latest data
+        self.refresh_accounts_page()
+        self.stack.setCurrentWidget(self.page_accounts)
+        self.highlight_nav("Accounts")
+        print(f"[DEBUG] Accounts page displayed")
+
+    def show_reports(self):
+        """Show reports view"""
+        self.stack.setCurrentWidget(self.page_reports)
+        self.highlight_nav("Reports")
+
+    def show_settings(self):
+        """Show settings view"""
+        self.stack.setCurrentWidget(self.page_settings)
+        self.highlight_nav("Settings")
+
+    def show_link_bank(self):
+        """Show link bank view"""
+        self.stack.setCurrentWidget(self.page_bank)
+        self.highlight_nav("Link Bank")
+
+    def highlight_nav(self, active_text):
+        """Highlight the active navigation button"""
+        if hasattr(self, 'nav_bar') and hasattr(self.nav_bar, 'nav_buttons'):
+            for text, btn in self.nav_bar.nav_buttons.items():
+                if text == active_text:
+                    btn.setChecked(True)
+                else:
+                    btn.setChecked(False)
+
+    def setup_metrics_carousel(self,layout):
+        """3-card financial overview with real data"""
+        # Create the 3-card container
+        overview_frame = QFrame()
+        overview_frame.setStyleSheet("QFrame { padding-top: 0px; }")
+        overview_layout = QHBoxLayout(overview_frame)
+        overview_layout.setSpacing(20)
+        overview_layout.setContentsMargins(0,0,0,0)
+        
+        # Store layout and frame for refresh
+        self.overview_frame = overview_frame
+        self.overview_layout = overview_layout
+
+        try:
+            # Import the required functions
+            from database.db_manager import fetch_all,fetch_one
+            from core.plaid_api import get_account_balances
+
+            # Get REAL checking account balance from Plaid first
+            checking_balance = 0
+            has_plaid_checking = False
+
+            # Get Plaid checking accounts (which are stored as 'salary' type) - ONLY primary
+            plaid_accounts = fetch_all("""
+                SELECT account_id, plaid_token, account_type, bank_name
+                FROM accounts 
+                WHERE user_id = ? 
+                AND account_type = 'salary'
+                AND is_primary = 1
+                AND plaid_token IS NOT NULL
+            """,(self.user_id,))
+
+            if plaid_accounts:
+                has_plaid_checking = True
+                for account in plaid_accounts:
+                    try:
+                        balances_data = get_account_balances(account["plaid_token"])
+                        # Check if response contains an error
+                        if "error" in balances_data:
+                            logger.warning(f"Plaid balance error for account {account['account_id']}: {balances_data['error']}")
+                            continue
+                        for acc_balance in balances_data.get("accounts",[]):
+                            if acc_balance["account_id"] == account["account_id"]:
+                                balance = acc_balance["balances"].get("available",0)
+                                checking_balance += balance
+                    except Exception as e:
+                        logger.error(f"Error fetching balance for account {account['account_id']}: {e}")
+
+            # If Plaid failed, use transaction-based calculation
+            if not has_plaid_checking or checking_balance == 0:
+                checking_balance_row = fetch_one("""
+                    SELECT SUM(
+                        CASE 
+                            WHEN transaction_type = 'income' THEN amount 
+                            WHEN transaction_type = 'expense' THEN -amount 
+                            ELSE 0 
+                        END
+                    ) as balance
+                    FROM transactions
+                    WHERE user_id = ?
+                """,(self.user_id,))
+                checking_balance = checking_balance_row["balance"] if checking_balance_row and checking_balance_row[
+                    "balance"] is not None else 0
+
+            # Get savings balance - first try Plaid savings accounts, then fallback to transaction-based
+            # ONLY get primary savings account
+            savings = 0
+            plaid_savings_accounts = fetch_all("""
+                SELECT account_id, plaid_token, account_type, bank_name
+                FROM accounts 
+                WHERE user_id = ? 
+                AND account_type = 'savings'
+                AND is_primary = 1
+                AND plaid_token IS NOT NULL
+            """,(self.user_id,))
+            
+            if plaid_savings_accounts:
+                # Get real savings balance from Plaid
+                for account in plaid_savings_accounts:
+                    try:
+                        balances_data = get_account_balances(account["plaid_token"])
+                        if "error" in balances_data:
+                            logger.warning(f"Plaid savings balance error for account {account['account_id']}: {balances_data['error']}")
+                            continue
+                        for acc_balance in balances_data.get("accounts",[]):
+                            if acc_balance["account_id"] == account["account_id"]:
+                                balance = acc_balance["balances"].get("available",0)
+                                savings += balance
+                    except Exception as e:
+                        logger.error(f"Error fetching savings balance for account {account['account_id']}: {e}")
+            
+            # If no Plaid savings accounts, use transaction-based calculation as fallback
+            if not plaid_savings_accounts:
+                savings_row = fetch_one("""
+                    SELECT SUM(amount) AS total
+                    FROM transactions t
+                    JOIN categories c ON t.category_id = c.category_id
+                    WHERE t.user_id = ? AND c.category_name = 'Savings'
+                """,(self.user_id,))
+                # Handle sqlite3.Row object
+                try:
+                    savings = savings_row["total"] if savings_row and "total" in savings_row.keys() and savings_row["total"] is not None else 0
+                except (KeyError, TypeError, AttributeError):
+                    savings = 0
+
+            # Get commitments (unpaid) - handle NULL is_paid values
+            commitments_row = fetch_one("""
+                SELECT COALESCE(SUM(amount), 0) AS total
+                FROM category_commitments
+                WHERE user_id = ? AND COALESCE(is_paid, 0) = 0
+            """,(self.user_id,))
+            # Handle sqlite3.Row object
+            try:
+                commitments = commitments_row["total"] if commitments_row and "total" in commitments_row.keys() and commitments_row["total"] is not None else 0
+            except (KeyError, TypeError, AttributeError):
+                commitments = 0
+
+            # Calculate available balance
+            # Available balance = checking balance - unpaid commitments
+            available = checking_balance - commitments
+
+            # Get currency
+            user_currency = fetch_one("SELECT currency FROM settings WHERE user_id = ?",(self.user_id,))
+            # Handle sqlite3.Row object
+            try:
+                currency = user_currency["currency"] if user_currency and "currency" in user_currency.keys() else "USD"
+            except (KeyError, TypeError, AttributeError):
+                currency = "USD"
+
+            # Create the 3 cards - show empty cards with buttons when balance is 0 or no account
+            # Check if accounts exist
+            has_savings_account = fetch_one("""
+                SELECT account_id FROM accounts 
+                WHERE user_id = ? AND account_type = 'savings' AND is_primary = 1
+                LIMIT 1
+            """, (self.user_id,))
+            
+            has_main_account = fetch_one("""
+                SELECT account_id FROM accounts 
+                WHERE user_id = ? AND account_type = 'salary' AND is_primary = 1
+                LIMIT 1
+            """, (self.user_id,))
+            
+            has_savings = has_savings_account is not None
+            has_main = has_main_account is not None
+            
+            # Create cards - show empty cards with buttons when balance is 0 or no account
+            if has_savings and savings > 0:
+                savings_card = self.create_finance_card(
+                    "Savings Balance",
+                    f"{currency} {savings:,.2f}",
+                    "#10B981",
+                    "positive"
+                )
+            else:
+                def show_link_bank_savings():
+                    # Find the dashboard window by traversing parent widgets
+                    widget = self
+                    while widget:
+                        if hasattr(widget, 'show_link_bank'):
+                            widget.show_link_bank()
+                            return
+                        widget = widget.parent()
+                    # Fallback: try to find DashboardMain window
+                    from PyQt5.QtWidgets import QApplication
+                    for widget in QApplication.topLevelWidgets():
+                        if hasattr(widget, 'show_link_bank'):
+                            widget.show_link_bank()
+                            return
+                
+                savings_card = self.create_empty_card(
+                    " Savings Balance",
+                    "Add Savings Account",
+                    show_link_bank_savings
+                )
+
+            # Price After Commitments always shows as finance card (even with 0.00)
+            commitments_card = self.create_finance_card(
+                "Balance After Commitments",
+                f"{currency} {available:,.2f}",
+                "#F59E0B",
+                "warning"
+            )
+            
+            # Available Balance shows empty card if no account or balance is 0
+            if has_main and checking_balance > 0:
+                available_card = self.create_finance_card(
+                    " Available Balance",
+                    f"{currency} {available:,.2f}",
+                    "#10B981",
+                    "positive"
+                )
+            else:
+                def show_link_bank_main2():
+                    # Find the dashboard window by traversing parent widgets
+                    widget = self
+                    while widget:
+                        if hasattr(widget, 'show_link_bank'):
+                            widget.show_link_bank()
+                            return
+                        widget = widget.parent()
+                    # Fallback: try to find DashboardMain window
+                    from PyQt5.QtWidgets import QApplication
+                    for widget in QApplication.topLevelWidgets():
+                        if hasattr(widget, 'show_link_bank'):
+                            widget.show_link_bank()
+                            return
+                
+                available_card = self.create_empty_card(
+                    "Available Balance",
+                    "Add Bank Account",
+                    show_link_bank_main2
+                )
+
+            # Make Balance After Commitments card 1/8 bigger (160 * 1.125 = 180)
+            commitments_card.setFixedHeight(180)
+            overview_layout.addWidget(savings_card)
+            overview_layout.addWidget(commitments_card)
+            overview_layout.addWidget(available_card)
+
+        except Exception as e:
+            print(f"Error loading financial data: {e}")
+            # Fallback to empty cards with buttons if real data fails
+            def show_link_bank_fallback2():
+                # Find the dashboard window by traversing parent widgets
+                widget = self
+                while widget:
+                    if hasattr(widget, 'show_link_bank'):
+                        widget.show_link_bank()
+                        return
+                    widget = widget.parent()
+                # Fallback: try to find DashboardMain window
+                from PyQt5.QtWidgets import QApplication
+                for widget in QApplication.topLevelWidgets():
+                    if hasattr(widget, 'show_link_bank'):
+                        widget.show_link_bank()
+                        return
+            
+            savings_card = self.create_empty_card(
+                " Savings Balance",
+                "Add Savings Account",
+                show_link_bank_fallback2
+            )
+
+            # Price After Commitments always shows as finance card (even with 0.00)
+            commitments_card = self.create_finance_card(
+                "Balance After Commitments",
+                f"{currency} 0.00",
+                "#F59E0B",
+                "warning"
+            )
+
+            available_card = self.create_empty_card(
+                "Available Balance",
+                "Add Bank Account",
+                show_link_bank_fallback2
+            )
+
+            commitments_card.setFixedHeight(180)
+            overview_layout.addWidget(savings_card)
+            overview_layout.addWidget(commitments_card)
+            overview_layout.addWidget(available_card)
+
+        if layout:
+            layout.addWidget(overview_frame)
+
+
+
+    def create_finance_card(self,title,value,color,card_type):
+        """Create a clean finance card with visible text"""
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background: white;
+                border: 1px solid #E5E7EB;
+                border-radius: 16px;
+            }}
+            QFrame:hover {{
+                border: 1px solid {color};
+                background: #F9FAFB;
+            }}
+        """)
+        card.setFixedHeight(160)
+        card.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed)
+
+        # Main layout for the card
+        main_layout = QVBoxLayout(card)
+        main_layout.setContentsMargins(30,25,30,25)  # Increased padding
+        main_layout.setSpacing(10)
+
+        # Title label - make sure it's visible
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"""
+            QLabel {{
+                color: #374151;
+                font-size: 16px;
+                font-weight: 600;
+                background: transparent;
+                border: none;
+            }}
+        """)
+        title_label.setAlignment(Qt.AlignLeft)
+
+        # Value label - make sure it's visible and large
+        value_label = QLabel(value)
+        value_label.setStyleSheet(f"""
+            QLabel {{
+                color: {color};
+                font-size: 42px;
+                font-weight: bold;
+                background: transparent;
+                border: none;
+            }}
+        """)
+        value_label.setAlignment(Qt.AlignLeft)
+
+        # Add labels to layout
+        main_layout.addWidget(title_label)
+        main_layout.addWidget(value_label)
+        main_layout.addStretch()
+
+        # Subtle shadow
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(15)
+        shadow.setXOffset(0)
+        shadow.setYOffset(3)
+        shadow.setColor(QColor(0,0,0,25))
+        card.setGraphicsEffect(shadow)
+
+        return card
+
+    def create_empty_card(self, title, button_text, button_callback):
+        """Create an empty state card with a prominent '+' button to add account"""
+        from PyQt5.QtWidgets import QFrame, QVBoxLayout, QLabel, QPushButton
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtGui import QColor
+        from PyQt5.QtWidgets import QGraphicsDropShadowEffect, QSizePolicy
+        import qtawesome as qta
+        
+        card = QFrame()
+        card.setFixedHeight(160)
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        main_layout = QVBoxLayout(card)
+        main_layout.setContentsMargins(30, 25, 30, 25)
+        main_layout.setSpacing(12)
+        main_layout.setAlignment(Qt.AlignCenter)
+
+        # Title label
+        title_label = QLabel(title)
+        title_label.setStyleSheet("""
+            QLabel {
+                color: #6B7280;
+                font-size: 16px;
+                font-weight: 600;
+                background: transparent;
+                border: none;
+            }
+        """)
+        title_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(title_label)
+
+        # Add a visible button instead of just text
+        add_button = QPushButton(button_text)
+        add_button.setCursor(Qt.PointingHandCursor)
+        add_button.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #d6733a, stop:1 #b45131);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 20px;
+                font-size: 14px;
+                font-weight: 600;
+                min-width: 150px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #e6824a, stop:1 #c56141);
+                transform: scale(1.05);
+            }
+            QPushButton:pressed {
+                background: #b45131;
+            }
+        """)
+        add_button.clicked.connect(button_callback)
+        main_layout.addWidget(add_button)
+
+        # Make entire card clickable as well for better UX
+        def card_clicked(event):
+            button_callback()
+        
+        card.mousePressEvent = card_clicked
+        card.setCursor(Qt.PointingHandCursor)
+
+        # Update card style to show it's clickable
+        card.setStyleSheet("""
+            QFrame {
+                background: white;
+                border: 2px dashed #D1D5DB;
+                border-radius: 16px;
+            }
+            QFrame:hover {
+                border-color: #d6733a;
+                background: #fffaf5;
+            }
+        """)
+
+        # Subtle shadow
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(15)
+        shadow.setXOffset(0)
+        shadow.setYOffset(3)
+        shadow.setColor(QColor(0, 0, 0, 25))
+        card.setGraphicsEffect(shadow)
+
+        return card
+
+    def darken_color(self,hex_color):
+        """Darken a color for gradient effect"""
+        color = QColor(hex_color)
+        color = color.darker(120)
+        return color.name()
+
+    def setup_navigation(self):
+        """Setup sidebar navigation (now handled in setup_ui)"""
+        nav_callbacks = {
+            "Dashboard": self.show_dashboard,
+            "Transactions": self.show_transactions,
+            "Accounts": self.show_accounts,
+            "Reports": self.show_reports,
+            "Settings": self.show_settings,
+            "Link Bank": self.show_link_bank
+        }
+        self.nav_bar = ModernNavigationBar(self, self.logout, nav_callbacks)
+
+    def setup_ui(self):
+        """Setup main content area with sidebar layout"""
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        # Main vertical layout: title bar at top, then sidebar+content below
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(0,0,0,0)
+        main_layout.setSpacing(0)
+
+        # Title bar at top (spans full width)
+        self.title_bar = CustomTitleBar(self)
+        main_layout.addWidget(self.title_bar)
+
+        # Content area: sidebar + main content (horizontal)
+        content_wrapper = QWidget()
+        content_wrapper_layout = QHBoxLayout(content_wrapper)
+        content_wrapper_layout.setContentsMargins(0,0,0,0)
+        content_wrapper_layout.setSpacing(0)
+
+        # Sidebar on the left
+        self.setup_navigation()  # Creates self.nav_bar
+        content_wrapper_layout.addWidget(self.nav_bar)
+
+        # Create stacked widget for different pages
+        self.stack = QStackedWidget()
+        content_wrapper_layout.addWidget(self.stack)
+
+        # Create all pages
+        self.create_pages()
+
+        main_layout.addWidget(content_wrapper)
+
+
+
+
+
+
+    def setup_header(self,layout):
+        """Clean header with minimal spacing"""
+        welcome = QLabel(f"Welcome back, {self.username}!")
+        welcome.setFont(QFont("Segoe UI",22,QFont.Bold))
+        welcome.setStyleSheet("""
+            color: #111827; 
+            margin: 0px; 
+            padding: 0px;
+            
+            /* Force minimum height/line height to match the 22px font size */
+            font-size: 22px;
+            line-height: 22px; 
+            min-height: 22px;
+            
+        """)
+        welcome.setAlignment(Qt.AlignLeft)
+
+        layout.addWidget(welcome)
+
+    def animate_entrance(self):
+        self.animation_timer.stop()
+        # Simple fade-in animation for main sections
+        # Only animate penny widget since badges are disabled
+        if hasattr(self,'penny_widget') and self.penny_widget:
+            animation = QPropertyAnimation(self.penny_widget,b"windowOpacity")
+            animation.setDuration(800)
+            animation.setStartValue(0)
+            animation.setEndValue(1)
+            animation.setEasingCurve(QEasingCurve.OutCubic)
+            animation.start()
+
+    def setup_main_content(self,layout):
+        """
+        Sets up the main content area with ONLY Financial Companion
+        (Commitments are now handled in the main layout flow)
+        """
+        # Remove any commitment-related code from here
+        # The commitments are already added in the main layout via setup_ui()
+
+        # --- Financial Companion Section ONLY ---
+        companion_title = QLabel("Pennys corner")
+        companion_title.setFont(QFont("Segoe UI",18,QFont.Bold))
+        companion_title.setStyleSheet("color: #1F2937; margin-top: 15px;")
+
+
+
+
+
+        # EnhancedPennyWidget
+        self.penny_companion = EnhancedPennyWidget(self.user_id,self.username)
+        layout.addWidget(self.penny_companion)
+
+        # Add space between Penny's corner and Recent Transactions
+        spacer = QSpacerItem(1, 40, QSizePolicy.Minimum, QSizePolicy.Fixed)
+        layout.addItem(spacer)
+
+        # --- Recent Transactions Section ---
+        transactions_title = QLabel(" Recent Transactions")
+        transactions_title.setFont(QFont("Segoe UI",18,QFont.Bold))
+        transactions_title.setStyleSheet("color: #1F2937; margin-top: 15px;")
+        layout.addWidget(transactions_title)
+
+        # Add transactions section
+        self.add_recent_transactions(layout)
+
+        # Add a stretch spacer
+        layout.addStretch()
+
+    def add_recent_transactions(self, layout):
+        """Add recent transactions section grouped by dates with Poppins font"""
+        # Store reference to layout for refreshing
+        self.recent_transactions_layout = layout
+        
+        # Get ALL transactions - show all transactions, not filtered
+        transactions = fetch_all("""
+            SELECT t.*, c.category_name, a.bank_name 
+            FROM transactions t
+            LEFT JOIN categories c ON t.category_id = c.category_id
+            LEFT JOIN accounts a ON t.account_id = a.id
+            WHERE t.user_id = ?
+            ORDER BY t.date DESC, t.transaction_id DESC
+        """, (self.user_id,))
+
+        # Clean container (matching dashboard background)
+        activity_frame = QFrame()
+        activity_frame.setStyleSheet("""
+            QFrame { 
+                background: #f9f7f5; 
+                padding: 0px; 
+            }
+        """)
+        # Store reference to frame for refreshing
+        self.recent_transactions_frame = activity_frame
+        activity_layout = QVBoxLayout(activity_frame)
+        activity_layout.setSpacing(0)
+        activity_layout.setContentsMargins(0, 0, 0, 0)
+
+        if not transactions:
+            no_data = QLabel("No recent transactions found")
+            no_data.setStyleSheet("""
+                color: #6B7280; 
+                font-family: 'Poppins', sans-serif;
+                font-size: 14px; 
+                font-style: italic; 
+                padding: 40px 20px;
+                text-align: center;
+            """)
+            no_data.setAlignment(Qt.AlignCenter)
+            activity_layout.addWidget(no_data)
+        else:
+            # Group transactions by date
+            grouped_transactions = self.group_transactions_by_date(transactions)
+            
+            for date, date_transactions in grouped_transactions.items():
+                # Add date header
+                date_header = self.create_date_header(date, date_transactions)
+                activity_layout.addWidget(date_header)
+                
+                # Add transactions for this date (no separators between transactions)
+                for txn in date_transactions:
+                    txn_widget = self.create_modern_transaction_widget(txn)
+                    activity_layout.addWidget(txn_widget)
+                
+                # Add spacing between date groups
+                if date != list(grouped_transactions.keys())[-1]:
+                    spacer = QFrame()
+                    spacer.setFixedHeight(20)
+                    spacer.setStyleSheet("background: transparent;")
+                    activity_layout.addWidget(spacer)
+        
+        layout.addWidget(activity_frame)
+    
+    def refresh_recent_transactions(self):
+        """Refresh the recent transactions section"""
+        if hasattr(self, 'recent_transactions_frame') and hasattr(self, 'recent_transactions_layout'):
+            # Remove old frame
+            self.recent_transactions_layout.removeWidget(self.recent_transactions_frame)
+            self.recent_transactions_frame.deleteLater()
+            
+            # Rebuild transactions section
+            self.add_recent_transactions(self.recent_transactions_layout)
+
+    def group_transactions_by_date(self, transactions):
+        """Group transactions by date, maintaining order within each date"""
+        from collections import defaultdict
+        from datetime import datetime
+        
+        grouped = defaultdict(list)
+        for txn in transactions:
+            # Parse date and format it nicely
+            if isinstance(txn['date'], str):
+                date_obj = datetime.strptime(txn['date'].split()[0], '%Y-%m-%d')
+            else:
+                date_obj = txn['date']
+            
+            date_key = date_obj.strftime('%B %d, %Y')
+            grouped[date_key].append(txn)
+        
+        # Sort transactions within each date group by transaction_id DESC (newest first)
+        # Handle sqlite3.Row objects - use bracket notation
+        for date_key in grouped:
+            grouped[date_key].sort(key=lambda x: x['transaction_id'] if 'transaction_id' in x.keys() else 0, reverse=True)
+        
+        # Sort dates (newest first) and return ordered dict
+        sorted_dates = sorted(grouped.keys(), key=lambda x: datetime.strptime(x, '%B %d, %Y'), reverse=True)
+        return {date: grouped[date] for date in sorted_dates}
+
+    def create_date_header(self, date, transactions):
+        """Create a date header with daily subtotal matching the image style"""
+        # Calculate daily subtotal
+        daily_total = sum(
+            txn['amount'] if txn['transaction_type'] == 'income' else -txn['amount']
+            for txn in transactions
+        )
+        
+        header_widget = QFrame()
+        header_widget.setStyleSheet("""
+            QFrame {
+                background: #f5f2ed;
+                padding: 8px 16px;
+                border-radius: 8px;
+                margin: 4px 0;
+            }
+        """)
+        
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Date label (slightly darker than background)
+        date_label = QLabel(date)
+        date_label.setStyleSheet("""
+            font-family: 'Poppins', sans-serif;
+            font-size: 15px;
+            font-weight: 500;
+            color: #6B7280;
+        """)
+        
+        # Daily subtotal (slightly darker than background)
+        total_label = QLabel(f"{'+' if daily_total >= 0 else ''}{daily_total:,.2f}")
+        total_label.setStyleSheet(f"""
+            font-family: 'Poppins', sans-serif;
+            font-size: 15px;
+            font-weight: 500;
+            color: #6B7280;
+        """)
+        
+        header_layout.addWidget(date_label)
+        header_layout.addStretch()
+        header_layout.addWidget(total_label)
+        
+        # No separator line - just return the header widget
+        return header_widget
+
+    def create_modern_transaction_widget(self, txn):
+        """Create a modern transaction widget matching the exact image style"""
+        widget = QFrame()
+        widget.setStyleSheet("""
+            QFrame { 
+                background: #f9f7f5;
+                padding: 8px 16px;
+                margin: 0;
+            } 
+            QFrame:hover { 
+                background: #f0ede8;
+            }
+        """)
+        
+        layout = QHBoxLayout(widget)
+        layout.setSpacing(12)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Left side: Description and time
+        left_layout = QVBoxLayout()
+        left_layout.setSpacing(2)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Merchant name (grey, not bold) - no bullet point
+        merchant_name = QLabel(txn["description"] or "No description")
+        merchant_name.setStyleSheet("""
+            font-family: 'Poppins', sans-serif;
+            font-weight: 400; 
+            font-size: 15px; 
+            color: #6B7280;
+        """)
+        left_layout.addWidget(merchant_name)
+        
+        # Transaction time
+        time_label = QLabel(self.format_transaction_time(txn['date']))
+        time_label.setStyleSheet("""
+            font-family: 'Poppins', sans-serif;
+            font-weight: 400; 
+            font-size: 12px; 
+            color: #9CA3AF;
+        """)
+        left_layout.addWidget(time_label)
+        
+        layout.addLayout(left_layout)
+        layout.addStretch()
+
+        # Amount and arrow (right-aligned)
+        right_layout = QHBoxLayout()
+        right_layout.setSpacing(6)
+        
+        # Amount - NO prefix for debits, only + for credits
+        if txn['transaction_type'] == 'income':
+            amount_text = f"+${txn['amount']:.2f}"
+        else:
+            amount_text = f"${txn['amount']:.2f}"
+            
+        amount = QLabel(amount_text)
+        amount.setStyleSheet(f"""
+            font-family: 'Poppins', sans-serif;
+            font-weight: 600; 
+            font-size: 15px; 
+            color: {'#10B981' if txn['transaction_type'] == 'income' else '#EF4444'};
+        """)
+        right_layout.addWidget(amount)
+        
+        # Small arrow icon (grey)
+        arrow_icon = QLabel(">")
+        arrow_icon.setStyleSheet("""
+            font-family: 'Poppins', sans-serif;
+            color: #9CA3AF;
+            font-size: 12px;
+            font-weight: bold;
+        """)
+        right_layout.addWidget(arrow_icon)
+        
+        layout.addLayout(right_layout)
+        
+        return widget
+    
+    def format_transaction_time(self, date_value):
+        """Format transaction date to show time"""
+        try:
+            if isinstance(date_value, str):
+                # Try parsing as datetime string
+                if ' ' in date_value:
+                    # Has time component
+                    date_obj = datetime.strptime(date_value.split('.')[0], '%Y-%m-%d %H:%M:%S')
+                else:
+                    # Date only, parse just the date
+                    date_obj = datetime.strptime(date_value.split()[0], '%Y-%m-%d')
+            else:
+                # Already a datetime object
+                date_obj = date_value
+            
+            # Check if it's today - only show "Today" for current day transactions
+            today = datetime.now().date()
+            trans_date = date_obj.date()
+            
+            if trans_date == today:
+                # For today's transactions, show time if available
+                if isinstance(date_value, str) and ' ' in date_value:
+                    time_str = date_obj.strftime('%I:%M %p')
+                    return f"Today {time_str}"
+                else:
+                    # No time component, use current time or just show "Today"
+                    time_str = datetime.now().strftime('%I:%M %p')
+                    return f"Today {time_str}"
+            else:
+                # For previous days, show full date and time (no "Today" prefix)
+                if isinstance(date_value, str) and ' ' in date_value:
+                    time_str = date_obj.strftime('%I:%M %p')
+                    return f"{date_obj.strftime('%b %d, %Y')} {time_str}"
+                else:
+                    # No time component, just show date
+                    return date_obj.strftime('%b %d, %Y')
+                
+        except Exception as e:
+            print(f"Error formatting time: {e}")
+            return "Recently"
+
+    def create_clean_transaction_widget(self, txn):
+        """Create a clean transaction widget matching the second image style"""
+        widget = QFrame()
+        widget.setStyleSheet("""
+            QFrame { 
+                background: transparent;
+                padding: 12px 0;
+            } 
+            QFrame:hover { 
+                background-color: #F8F9FA;
+            }
+        """)
+        layout = QHBoxLayout(widget)
+        layout.setSpacing(16)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Small selection/status icon (like in the second image)
+        status_icon = QLabel()
+        status_icon.setFixedSize(16, 16)
+        status_icon.setStyleSheet("""
+            QLabel {
+                background: #E5E7EB;
+                border-radius: 8px;
+            }
+        """)
+        layout.addWidget(status_icon)
+
+        # Transaction description (main text)
+        desc = QLabel(txn["description"] or "No description")
+        desc.setStyleSheet("""
+            font-weight: 500; 
+            font-size: 15px; 
+            color: #111827;
+        """)
+        layout.addWidget(desc)
+
+        # Category with icon
+        category_layout = QHBoxLayout()
+        category_layout.setSpacing(8)
+        
+        # Category icon (using a simple colored circle for now)
+        category_icon = QLabel()
+        category_icon.setFixedSize(20, 20)
+        category_icon.setStyleSheet(f"""
+            QLabel {{
+                background: {'#EF4444' if txn['transaction_type'] == 'expense' else '#10B981'};
+                border-radius: 10px;
+            }}
+        """)
+        category_layout.addWidget(category_icon)
+        
+        # Category name
+        category_name = QLabel(txn['category_name'] or 'Uncategorized')
+        category_name.setStyleSheet("""
+            font-size: 14px; 
+            color: #374151;
+        """)
+        category_layout.addWidget(category_name)
+        
+        layout.addLayout(category_layout)
+        layout.addStretch()
+
+        # Amount and arrow
+        right_layout = QHBoxLayout()
+        right_layout.setSpacing(8)
+        
+        # Amount
+        amount = QLabel(f"${txn['amount']:.2f}")
+        amount.setStyleSheet(f"""
+            font-weight: 600; 
+            font-size: 15px; 
+            color: {'#111827' if txn['transaction_type'] == 'expense' else '#10B981'};
+        """)
+        right_layout.addWidget(amount)
+        
+        # Small arrow icon (like in the second image)
+        arrow_icon = QLabel("→")
+        arrow_icon.setStyleSheet("""
+            color: #9CA3AF;
+            font-size: 12px;
+        """)
+        right_layout.addWidget(arrow_icon)
+        
+        layout.addLayout(right_layout)
+        
+        return widget
+
+    def setup_penny_corner_full_width(self,grid_layout,row,col):
+        """Penny's Corner spanning full width (replaces badges section)"""
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0,0,0,0)
+        container_layout.setSpacing(12)
+
+        header = QHBoxLayout()
+        title = QLabel("Financial Companion")
+        title.setFont(QFont("Segoe UI",18,QFont.Bold))
+        title.setStyleSheet("color: #111827;")
+
+        status = QLabel("AI Assistant Active")
+        status.setStyleSheet("""
+            color: #10B981;
+            font-weight: bold;
+            background: rgba(16,185,129,0.1);
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+        """)
+
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(status)
+
+        self.penny_widget = EnhancedPennyWidget(self.user_id,self.username)
+        self.penny_widget.personality_ready.connect(self.on_penny_personality_ready)
+
+        container_layout.addLayout(header)
+        container_layout.addWidget(self.penny_widget)
+
+        grid_layout.addWidget(container,row,col,1,2)  # Span both columns
+
+    # Comment out or remove the badges section setup
+    def setup_badges_section(self,grid_layout,row,col):
+        """Badges section - TEMPORARILY DISABLED"""
+        # Create a placeholder instead of badges
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0,0,0,0)
+        container_layout.setSpacing(15)
+
+        header = QHBoxLayout()
+        title = QLabel("Financial Achievements")
+        title.setFont(QFont("Segoe UI",18,QFont.Bold))
+        title.setStyleSheet("color: #111827;")
+
+        placeholder_label = QLabel("Badges feature coming soon...")
+        placeholder_label.setStyleSheet("""
+            color: #6B7280;
+            font-size: 14px;
+            font-style: italic;
+            padding: 40px;
+            background: #F9FAFB;
+            border-radius: 12px;
+            border: 2px dashed #E5E7EB;
+        """)
+        placeholder_label.setAlignment(Qt.AlignCenter)
+
+        container_layout.addWidget(title)
+        container_layout.addWidget(placeholder_label)
+
+        grid_layout.addWidget(container,row,col)
+
+    def setup_mood_section(self,grid_layout,row,col):
+        """Mood meter in grid"""
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0,0,0,0)
+        container_layout.setSpacing(12)
+
+        title = QLabel("Financial Wellness")
+        title.setFont(QFont("Segoe UI",18,QFont.Bold))
+        title.setStyleSheet("color: #111827;")
+
+        self.mood_meter = MoodMeter(self.user_id)
+
+        container_layout.addWidget(title)
+        container_layout.addWidget(self.mood_meter)
+
+        grid_layout.addWidget(container,row,col)
+
+
+    def setup_penny_corner(self,grid_layout,row,col):
+        """Penny's Corner in grid"""
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0,0,0,0)
+        container_layout.setSpacing(12)
+
+        header = QHBoxLayout()
+        title = QLabel("Financial Companion")
+        title.setFont(QFont("Segoe UI",18,QFont.Bold))
+        title.setStyleSheet("color: #111827;")
+
+        status = QLabel("AI Assistant Active")
+        status.setStyleSheet("""
+            color: #10B981;
+            font-weight: bold;
+            background: rgba(16,185,129,0.1);
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+        """)
+
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(status)
+
+        self.penny_widget = EnhancedPennyWidget(self.user_id,self.username)
+        self.penny_widget.personality_ready.connect(self.on_penny_personality_ready)
+
+        container_layout.addLayout(header)
+        container_layout.addWidget(self.penny_widget)
+
+        grid_layout.addWidget(container,row,col)
+
+    def setup_analytics(self,grid_layout,row,col):
+        """Analytics section in grid"""
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0,0,0,0)
+        container_layout.setSpacing(15)
+
+        # Spending Overview
+        spending_card = CardWidget("Spending Overview","Monthly budget tracking")
+        spending_card.setStyleSheet("""
+            CardWidget {
+                background: white;
+                border: 1px solid #E5E7EB;
+                border-radius: 16px;
+            }
+        """)
+        spending_card.add_layout(self.create_spending_content())
+
+        # Financial Goals
+        goals_card = CardWidget("Financial Goals","Progress tracking")
+        goals_card.setStyleSheet("""
+            CardWidget {
+                background: white;
+                border: 1px solid #E5E7EB;
+                border-radius: 16px;
+            }
+        """)
+        goals_card.add_layout(self.create_goals_content())
+
+        container_layout.addWidget(spending_card)
+        container_layout.addWidget(goals_card)
+
+        grid_layout.addWidget(container,row,col)
+
+    def create_spending_content(self):
+        """Modern spending content with consistent progress bars"""
+        layout = QVBoxLayout()
+        layout.setSpacing(12)
+
+        categories = [
+            ("Dining & Food",75,120,"warning"),
+            ("Groceries",45,80,"default"),
+            ("Transport",35,60,"default"),
+            ("Entertainment",90,100,"danger"),
+            ("Subscriptions",25,50,"success")
+        ]
+
+        for name,spent,budget,variant in categories:
+            row = QHBoxLayout()
+            label = QLabel(name)
+            label.setStyleSheet("font-size: 13px; color: #374151; font-weight: 500;")
+            label.setFixedWidth(120)
+
+            prog = ProgressBar(spent,budget,"",True,variant)
+            prog.setFixedHeight(16)
+
+            amt = QLabel(f"${spent} / ${budget}")
+            amt.setStyleSheet("font-size: 12px; color: #6B7280; font-weight: 600;")
+            amt.setFixedWidth(80)
+
+            row.addWidget(label)
+            row.addWidget(prog)
+            row.addWidget(amt)
+            layout.addLayout(row)
+
+        return layout
+
+    def create_goals_content(self):
+        """Modern goals content with consistent styling"""
+        layout = QVBoxLayout()
+        layout.setSpacing(10)
+
+        goals = [
+            ("Emergency Fund",65,"$3,250 / $5,000"),
+            ("Vacation Fund",30,"$600 / $2,000"),
+            ("Investment",45,"Growing portfolio"),
+            ("Education",20,"Learning fund")
+        ]
+
+        for name,prog,target in goals:
+            goal_frame = QFrame()
+            goal_frame.setStyleSheet("""
+                QFrame {
+                    background: #F9FAFB;
+                    border-radius: 12px;
+                    padding: 12px;
+                }
+            """)
+
+            goal_layout = QVBoxLayout(goal_frame)
+            goal_layout.setSpacing(6)
+
+            # Header
+            header = QHBoxLayout()
+            goal_label = QLabel(name)
+            goal_label.setStyleSheet("font-weight: 600; color: #374151; font-size: 13px;")
+            perc_label = QLabel(f"{prog}%")
+            perc_label.setStyleSheet("color: #2563EB; font-weight: 700; font-size: 13px;")
+
+            header.addWidget(goal_label)
+            header.addStretch()
+            header.addWidget(perc_label)
+
+            # Progress bar
+            bar = ProgressBar(prog,100,"",False,"default")
+            bar.setFixedHeight(8)
+
+            # Target
+            target_label = QLabel(target)
+            target_label.setStyleSheet("color: #6B7280; font-size: 11px;")
+
+            goal_layout.addLayout(header)
+            goal_layout.addWidget(bar)
+            goal_layout.addWidget(target_label)
+
+            layout.addWidget(goal_frame)
+
+        return layout
+
+    def on_penny_personality_ready(self,personality_engine):
+        self.penny_personality = personality_engine
+
+    def refresh_mood_meter(self):
+        current_mood = self.mood_meter.refresh()
+        self.previous_mood = current_mood
+        self.update_penny_for_mood(current_mood)
+
+    def update_penny_for_mood(self,mood_data):
+        if hasattr(self,'penny_widget'):
+            self.penny_widget.update_user_mood(mood_data)
+
+    def refresh_badges(self):
+        new_badges = self.badges_widget.check_new_badges()
+        return new_badges
+
+    def setup_animations(self):
+        self.animation_timer = QTimer()
+        self.animation_timer.timeout.connect(self.animate_entrance)
+        self.animation_timer.start(150)
+
+    def animate_entrance(self):
+        self.animation_timer.stop()
+        # Simple fade-in animation for main sections
+        # Only animate penny widget since badges are disabled
+        widgets_to_animate = []
+        if hasattr(self,'penny_widget') and self.penny_widget:
+            widgets_to_animate.append(self.penny_widget)
+
+        for widget in widgets_to_animate:
+            animation = QPropertyAnimation(widget,b"windowOpacity")
+            animation.setDuration(800)
+            animation.setStartValue(0)
+            animation.setEndValue(1)
+            animation.setEasingCurve(QEasingCurve.OutCubic)
+            animation.start()
+
+    def on_tutorial_complete(self):
+        if hasattr(self,'penny_widget'):
+            self.penny_widget.celebrate_achievement('goal',{'goal_name': 'Tutorial Completion'})
+
+    def on_settings_changed(self, settings_data):
+        """Handle settings changes from settings window"""
+        try:
+            # Apply dark mode changes
+            if settings_data.get('dark_mode', False):
+                self.apply_dark_theme()
+            else:
+                self.apply_light_theme()
+                
+            # Apply custom accent color
+            if 'custom_accent_color' in settings_data:
+                self.apply_accent_color(settings_data['custom_accent_color'])
+                
+            # Refresh dashboard to apply currency changes
+            if 'currency' in settings_data:
+                self.refresh_dashboard()
+                
+            # Update username if changed
+            if 'username' in settings_data:
+                self.username = settings_data['username']
+                self.setWindowTitle(f"PennyWise - {self.username}'s Dashboard")
+                
+        except Exception as e:
+            print(f"Error applying settings changes: {e}")
+            
+    def apply_dark_theme(self):
+        """Apply dark theme to the entire application"""
+        dark_stylesheet = """
+            QMainWindow {
+                background: #1F2937;
+                color: #F9FAFB;
+            }
+            QWidget {
+                background: #1F2937;
+                color: #F9FAFB;
+            }
+            QFrame {
+                background: #374151;
+                border: 1px solid #4B5563;
+                border-radius: 8px;
+            }
+            QPushButton {
+                background: #4B5563;
+                color: #F9FAFB;
+                border: 1px solid #6B7280;
+                border-radius: 6px;
+                padding: 8px 16px;
+            }
+            QPushButton:hover {
+                background: #6B7280;
+            }
+            QPushButton:checked {
+                background: #d6733a;
+                border-color: #d6733a;
+            }
+            QLineEdit {
+                background: #374151;
+                color: #F9FAFB;
+                border: 1px solid #4B5563;
+                border-radius: 6px;
+                padding: 8px 12px;
+            }
+            QComboBox {
+                background: #374151;
+                color: #F9FAFB;
+                border: 1px solid #4B5563;
+                border-radius: 6px;
+                padding: 8px 12px;
+            }
+            QLabel {
+                color: #F9FAFB;
+            }
+        """
+        QApplication.instance().setStyleSheet(dark_stylesheet)
+        
+    def apply_light_theme(self):
+        """Apply light theme to the entire application"""
+        light_stylesheet = """
+            QMainWindow {
+                background: #F9FAFB;
+                color: #1F2937;
+            }
+            QWidget {
+                background: #F9FAFB;
+                color: #1F2937;
+            }
+            QFrame {
+                background: white;
+                border: 1px solid #E5E7EB;
+                border-radius: 8px;
+            }
+            QPushButton {
+                background: #d6733a;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+            }
+            QPushButton:hover {
+                background: #b45131;
+            }
+            QPushButton:checked {
+                background: #b45131;
+                border-color: #b45131;
+            }
+            QLineEdit {
+                background: white;
+                color: #1F2937;
+                border: 1px solid #E5E7EB;
+                border-radius: 6px;
+                padding: 8px 12px;
+            }
+            QComboBox {
+                background: white;
+                color: #1F2937;
+                border: 1px solid #E5E7EB;
+                border-radius: 6px;
+                padding: 8px 12px;
+            }
+            QLabel {
+                color: #1F2937;
+            }
+        """
+        QApplication.instance().setStyleSheet(light_stylesheet)
+        
+    def apply_accent_color(self, color):
+        """Apply custom accent color throughout the application"""
+        # This would update accent colors in various UI elements
+        # Implementation depends on your specific UI components
+        print(f"Applying accent color: {color}")
+        # You can extend this to update specific UI elements with the new accent color
+
+
+def main():
+    app = QApplication(sys.argv)
+    theme_manager.load_stylesheets()
+    theme_manager.apply_theme(app,"light")
+
+    dash = DashboardMain(user_id=1,username="Alex Johnson",show_tutorial=True)
+    dash.show()
+
+    return app.exec_()
+
+
+if __name__ == "__main__":
+    main()
