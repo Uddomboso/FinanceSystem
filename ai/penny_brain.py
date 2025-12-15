@@ -27,14 +27,12 @@ class PennyBrain:
     def set_monitor(self, monitor):
         """Set the monitor instance (called after both are initialized)"""
         self.monitor = monitor
-        logger.info("✅ AIMonitor connected to PennyBrain")
-
-    def set_monitor(self, monitor):
-        """Set the monitor instance (called after both are initialized)"""
-        self.monitor = monitor
 
     def get_financial_tip(self, user_id, financial_context=None):
-        """Get a financial tip with enhanced reliability"""
+        """Get a financial tip with enhanced reliability.
+
+        Returns (tip_text, tone, payload_dict|None)
+        """
         start_time = time.time()
         cache_hit = False
 
@@ -61,11 +59,11 @@ class PennyBrain:
                 response_time = (time.time() - start_time) * 1000  # ms
                 if self.monitor:
                     self.monitor.record_request(success=True, cache_hit=True, response_time=response_time)
-                return cached_insight, tone
+                return cached_insight, tone, None
 
         try:
             # Make API call
-            tip, tone = self._call_ai_api(user_id, financial_context)
+            tip, tone, payload = self._call_ai_api(user_id, financial_context)
 
             # Record successful request
             response_time = (time.time() - start_time) * 1000  # ms
@@ -81,7 +79,7 @@ class PennyBrain:
                 self.cache.cache_insight(financial_context, tip, tone)
 
             logger.info(f"✅ Penny tip generated successfully for user {user_id}")
-            return tip, tone
+            return tip, tone, payload
 
         except Exception as e:
             # Record failed request
@@ -99,13 +97,14 @@ class PennyBrain:
                 logger.warning("🔴 Circuit breaker opened due to repeated failures")
 
             # Return fallback
-            return self._get_fallback_tip(user_id), "friendly"
+            return self._get_fallback_tip(user_id), "friendly", None
 
     def _call_ai_api(self, user_id, financial_context=None):
         """Make API call to AI service with enhanced error handling"""
 
         if Config.DEMO_MODE:
-            return self._get_demo_tip(user_id), "friendly"
+            tip = self._get_demo_tip(user_id)
+            return tip, "friendly", None
 
         # Prepare context-aware prompt
         prompt = self._build_contextual_prompt(financial_context)
@@ -149,9 +148,9 @@ class PennyBrain:
             raw_tip = result["choices"][0]["message"]["content"].strip()
 
             # Parse and clean the response
-            tip, tone = self._parse_ai_response(raw_tip)
+            tip, tone, payload = self._parse_ai_response(raw_tip)
 
-            return tip, tone
+            return tip, tone, payload
 
         except requests.exceptions.Timeout:
             raise Exception("Penny API timeout - service unavailable")
@@ -169,47 +168,32 @@ class PennyBrain:
         except Exception as e:
             raise Exception(f"Penny API unexpected error: {str(e)}")
 
-    def _build_contextual_prompt(self, financial_context):
-        """Build context-aware prompt for better AI responses"""
-        base_prompt = "Give me a helpful, practical money tip for this week."
-
-        if not financial_context:
-            return base_prompt
-
-        # Add context to prompt
-        context_parts = []
-
-        if financial_context.get('budget_status', 0) > 0:
-            context_parts.append("I'm currently over budget in some categories")
-
-        if financial_context.get('top_categories'):
-            top_cats = financial_context['top_categories'][:3]
-            context_parts.append(f"My main spending is on {', '.join(top_cats)}")
-
-        if context_parts:
-            context_str = " Context: " + ". ".join(context_parts) + "."
-            return base_prompt + context_str
-
-        return base_prompt
-
-    def _get_system_prompt(self):
-        """Get the system prompt for Penny's personality"""
-        return """You are Penny, a friendly and empathetic financial assistant for PennyWise. 
-        Your name is Penny. You're warm, encouraging, and genuinely care about helping people with their finances.
-        Give short, practical, and encouraging money tips (1-2 sentences max). 
-        Be human-like, warm, and focus on actionable advice.
-        Always speak in first person as Penny.
-        Tone should be: friendly, encouraging, and practical.
-        Always respond in a complete sentence. Never use markdown or lists."""
-
     def _parse_ai_response(self, raw_response):
         """Parse and clean AI response"""
-        # Remove quotes and markdown if present
-        cleaned = re.sub(r'["*]', '', raw_response).strip()
+        cleaned = raw_response.strip()
 
-        # Ensure it sounds like Penny
+        payload = None
+        try:
+            payload = json.loads(cleaned)
+        except json.JSONDecodeError:
+            # Remove code fences or stray characters, then retry once
+            cleaned_no_fences = re.sub(r"```(?:json)?|```", "", cleaned, flags=re.IGNORECASE).strip()
+            try:
+                payload = json.loads(cleaned_no_fences)
+            except json.JSONDecodeError:
+                payload = None
+
+        if isinstance(payload, dict):
+            coaching = payload.get('coaching', '').strip()
+            action = payload.get('action_step', '').strip()
+            challenge = payload.get('challenge_name', 'Daily Mission').strip()
+            tip_text = f"{challenge}: {coaching}\nAction: {action}".strip()
+            tone = payload.get('tone_hint') or self._detect_tone(tip_text)
+            return tip_text, tone, payload
+
+        # Fallback to legacy parsing
+        cleaned = re.sub(r'["*]', '', cleaned).strip()
         if not cleaned.startswith(('I ', 'Hey', 'As ', 'Let')):
-            # Add Penny's voice if missing
             penny_intros = [
                 "I suggest ",
                 "As Penny, I think ",
@@ -219,14 +203,11 @@ class PennyBrain:
             import random
             cleaned = random.choice(penny_intros) + cleaned.lower()
 
-        # Detect tone from content
         tone = self._detect_tone(cleaned)
-
-        # Ensure it's a complete sentence
         if not cleaned.endswith(('.', '!', '?')):
             cleaned += '.'
 
-        return cleaned, tone
+        return cleaned, tone, None
 
     def _detect_tone(self, text):
         """Detect tone from text content"""

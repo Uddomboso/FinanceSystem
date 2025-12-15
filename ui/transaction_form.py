@@ -380,6 +380,19 @@ class TransactionForm(QWidget):
             recur = int(self.recurring.isChecked())
             add_txn(self.user_id, acc_id, cat_id, amt, tx_type, description, now, recur)
             
+            # Update simulated_balance for developer testing
+            # In production, Stripe/Plaid handles real balance changes
+            if tx_type == "expense":
+                execute_query("""
+                    UPDATE accounts SET simulated_balance = simulated_balance - ?
+                    WHERE id = ? AND simulated_balance IS NOT NULL
+                """, (amt, acc_id), commit=True)
+            elif tx_type == "income":
+                execute_query("""
+                    UPDATE accounts SET simulated_balance = simulated_balance + ?
+                    WHERE id = ? AND simulated_balance IS NOT NULL
+                """, (amt, acc_id), commit=True)
+            
             # Mark commitment as paid - Priority 1: If "Pay Now" was used (pending_commitment_id exists)
             # Priority 2: Try automatic matching
             commitment_matched = False
@@ -403,6 +416,12 @@ class TransactionForm(QWidget):
                     # Refresh commitment tracker and dashboard
                     if self.parent_dashboard and hasattr(self.parent_dashboard, 'commitment_tracker'):
                         self.parent_dashboard.commitment_tracker.load_commitments()
+                    # Also refresh dashboard metrics so Balance After Commitments updates
+                    if self.parent_dashboard:
+                        if hasattr(self.parent_dashboard, 'refresh_metrics_cards_main'):
+                            self.parent_dashboard.refresh_metrics_cards_main()
+                        if hasattr(self.parent_dashboard, 'metrics_carousel'):
+                            self.parent_dashboard.metrics_carousel.refresh_metrics_cards()
                 # Priority 2: Try automatic matching if no explicit commitment
                 elif cat_id:
                     from core.transactions import try_mark_commitment_for_txn
@@ -415,6 +434,12 @@ class TransactionForm(QWidget):
                         # Refresh commitment tracker
                         if self.parent_dashboard and hasattr(self.parent_dashboard, 'commitment_tracker'):
                             self.parent_dashboard.commitment_tracker.load_commitments()
+                        # Also refresh dashboard metrics when an automatic match occurs
+                        if self.parent_dashboard:
+                            if hasattr(self.parent_dashboard, 'refresh_metrics_cards_main'):
+                                self.parent_dashboard.refresh_metrics_cards_main()
+                            if hasattr(self.parent_dashboard, 'metrics_carousel'):
+                                self.parent_dashboard.metrics_carousel.refresh_metrics_cards()
                     else:
                         print(f"⚠️ No commitment matched for category_id={cat_id}, amount={amt}, description={description}")
             except Exception as e:

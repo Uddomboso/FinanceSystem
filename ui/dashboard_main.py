@@ -45,6 +45,8 @@ from core.commitment_manager import (
     get_suggested_amount
 )
 from ui.commitment_form import CommitmentForm, CommitmentSelectionDialog
+from ui.savings_form import SavingsForm
+
 from database.db_manager import fetch_all, fetch_one, execute_query
 from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QSize
 from PyQt5.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QFrame, QSizePolicy, QSpacerItem
@@ -218,6 +220,10 @@ class MetricsCarousel(QWidget):
         self.user_id = user_id
         self.current_index = 0
         self.metrics_data = []  # Will be populated with real data
+        self.current_available_balance = None
+        self.current_commitments_total = None
+        self.current_price_after_commitments = None
+        self.current_currency = "USD"
         self.setup_ui()
         self.load_real_data()
         self.start_rotation()
@@ -597,6 +603,16 @@ class MetricsCarousel(QWidget):
             # Price After Commitments = checking balance - unpaid commitments (what's left after paying all unpaid commitments)
             available_balance = checking_balance  # Available balance IS the checking balance
             price_after_commitments = checking_balance - commitments  # Price after paying all unpaid commitments
+            logger.info(
+                f"[metrics_carousel] user={self.user_id} checking_balance={checking_balance} "
+                f"savings_balance={savings} unpaid_commitments={commitments} "
+                f"available_balance={available_balance} price_after_commitments={price_after_commitments}"
+            )
+            logger.info(
+                f"[commitments] user={self.user_id} checking_balance={checking_balance} "
+                f"savings_balance={savings} unpaid_commitments={commitments} "
+                f"available_balance={available_balance} price_after_commitments={price_after_commitments}"
+            )
 
             # Get currency
             user_currency = fetch_one("SELECT currency FROM settings WHERE user_id = ?",(self.user_id,))
@@ -1332,6 +1348,20 @@ class CommitmentTrackerWidget(QWidget):
 
 
 
+
+
+    def refresh_commitments(self):
+        """Public helper to reload commitments safely."""
+        self.load_commitments()
+
+    def setup_savings_commitment(self):
+        """Open the savings goal form and refresh commitments afterward."""
+        try:
+            dlg = SavingsForm(self.user_id, parent_dashboard=self.parent_dashboard)
+            dlg.exec_()
+            self.load_commitments()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to open savings setup: {e}")
 
     def create_commitment_widget(self,category_name,amount,commitment_id,category_id,color,due_day):
         """Create a legacy row-style widget (retained but unused)."""
@@ -2269,175 +2299,20 @@ class CommitmentTrackerWidget(QWidget):
             return
 
         # Show modern commitment form
-        dlg = CommitmentForm(self.user_id, parent_dashboard=self.parent_dashboard)
-        if dlg.exec_():
-            # Commitment is saved in the form itself
+        dlg = CommitmentForm(self.user_id, parent_dashboard=self.parent_dashboard, category_name="Custom Commitment")
+        if hasattr(dlg, 'commitment_added'):
+            dlg.commitment_added.connect(self.handle_commitment_added_signal)
+
+        result = dlg.exec_()
+        if result == QDialog.Accepted:
+            # Reload commitments so the new entry appears immediately
             self.load_commitments()
-            # Refresh dashboard metrics
             if self.parent_dashboard:
                 self.parent_dashboard.refresh_dashboard()
-            return
-            
-            # Old code below - remove if not needed
-            # Handle the selected commitment
-            if item.get("is_custom", False):
-                # Create custom commitment
-                custom_name = item["name"]
-                amount = item["amount"]
-                
-                # Create category first
-                execute_query("""
-                    INSERT INTO categories (user_id, category_name, color, budget_amount)
-                    VALUES (?, ?, ?, ?)
-                """,(
-                    self.user_id,
-                    custom_name,
-                    self.get_category_color(custom_name.lower()),
-                    amount
-                ),commit=True)
-
-                # Get the new category ID
-                category = fetch_one(
-                    "SELECT category_id FROM categories WHERE category_name = ? AND user_id = ?",
-                    (custom_name,self.user_id)
-                )
-
-                if category:
-                    # Create commitment
-                    from core.commitment_manager import create_commitment
-                    create_commitment(self.user_id,category['category_id'],custom_name,amount)
-                    QMessageBox.information(self,"Commitment Created",
-                                            f"✅ ${amount:,.2f} commitment set for {custom_name}!")
-                    self.load_commitments()
-                    # Refresh dashboard metrics to update available balance
-                    if self.parent_dashboard:
-                        self.parent_dashboard.refresh_dashboard()
-            else:
-                # Quick add common commitment
-                common_name_map = {
-                    "Netflix": "netflix",
-                    "Spotify": "spotify",
-                    "Amazon Prime": "amazon",
-                    "Gym Membership": "gym",
-                    "Internet": "internet",
-                    "Phone Bill": "phone"
-                }
-                
-                commitment_name = item["name"]
-                category_type = common_name_map.get(commitment_name, "other")
-                amount = item["amount"]
-                self.create_quick_commitment(commitment_name, category_type, amount)
-
-    def create_custom_commitment(self):
-        """Fallback method to create custom commitment"""
-        category_name,ok = QInputDialog.getText(
-            self,"Custom Commitment","Enter category name:"
-        )
-
-        if ok and category_name:
-            amount,ok = QInputDialog.getDouble(
-                self,"Monthly Amount",
-                f"Enter monthly amount for {category_name}:",
-                value=50.00,min=1.00,max=1000.00,decimals=2
-            )
-
-            if ok and amount > 0:
-                # Create category first
-                execute_query("""
-                    INSERT INTO categories (user_id, category_name, color, budget_amount)
-                    VALUES (?, ?, ?, ?)
-                """,(
-                    self.user_id,
-                    category_name,
-                    self.get_category_color(category_name.lower()),
-                    amount
-                ),commit=True)
-
-                # Get the new category ID
-                category = fetch_one(
-                    "SELECT category_id FROM categories WHERE category_name = ? AND user_id = ?",
-                    (category_name,self.user_id)
-                )
-
-                if category:
-                    # Create commitment
-                    from core.commitment_manager import create_commitment
-                    create_commitment(self.user_id,category['category_id'],category_name,amount)
-                    QMessageBox.information(self,"Commitment Created",
-                                            f"✅ ${amount} monthly commitment set for {category_name}!")
-                    self.load_commitments()
-                    # Refresh dashboard metrics to update available balance
-                    if self.parent_dashboard:
-                        self.parent_dashboard.refresh_dashboard()
-
-    def create_quick_commitment(self,category_name,category_type,amount):
-        """Quickly create a commitment for common services"""
-        # Check if category exists, if not create it
-        category = fetch_one(
-            "SELECT category_id FROM categories WHERE category_name = ? AND user_id = ?",
-            (category_name,self.user_id)
-        )
-
-        if not category:
-            # Create the category first
-            execute_query("""
-                INSERT INTO categories (user_id, category_name, color, budget_amount)
-                VALUES (?, ?, ?, ?)
-            """,(
-                self.user_id,
-                category_name,
-                self.get_category_color(category_type),
-                amount
-            ),commit=True)
-
-            category = fetch_one(
-                "SELECT category_id FROM categories WHERE category_name = ? AND user_id = ?",
-                (category_name,self.user_id)
-            )
-
-        if category:
-            from core.commitment_manager import create_commitment
-            create_commitment(self.user_id,category['category_id'],category_name,amount)
-            QMessageBox.information(self,"Commitment Created",
-                                    f"✅ ${amount} monthly commitment set for {category_name}!\n\n"
-                                    f"When a transaction matches '{category_name}', it will be automatically marked as paid.")
-            self.load_commitments()
-            # Refresh dashboard metrics to update available balance
-            if self.parent_dashboard:
-                self.parent_dashboard.refresh_dashboard()
-
-    def get_category_color(self,category_type):
-        """Get color for common commitment categories"""
-        colors = {
-            'netflix': '#E50914',
-            'spotify': '#1DB954',
-            'amazon': '#FF9900',
-            'gym': '#8B5CF6',
-            'internet': '#3B82F6',
-            'phone': '#10B981'
-        }
-        return colors.get(category_type,'#6B7280')
-
-    def refresh_commitments(self):
-        """Public method to refresh commitments data"""
-        self.load_commitments()
-        # Also run commitment checks for due dates
-        from core.commitment_manager import check_commitments
-        check_commitments(self.user_id)
-
-    def setup_savings_commitment(self):
-        """Open commitment form for Savings category"""
-        try:
-            from ui.commitment_form import CommitmentForm
-            dlg = CommitmentForm(self.user_id, "Savings")
-            if dlg.exec_():
-                self.load_commitments()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to open savings commitment form: {e}")
-
-
-
-
+    def handle_commitment_added_signal(self, amount):
+        """Forward commitment delta to the main dashboard if available."""
+        if self.parent_dashboard and hasattr(self.parent_dashboard, 'handle_commitment_delta'):
+            self.parent_dashboard.handle_commitment_delta(amount)
 
 
 class DashboardMain(QMainWindow):
@@ -3610,6 +3485,12 @@ class DashboardMain(QMainWindow):
             if plaid_accounts:
                 has_plaid_checking = True
                 for account in plaid_accounts:
+                    # Priority 1: Use simulated_balance if set (for developer testing)
+                    sim_bal = fetch_one("SELECT simulated_balance FROM accounts WHERE account_id = ?", (account["account_id"],))
+                    if sim_bal and sim_bal["simulated_balance"] is not None:
+                        checking_balance += sim_bal["simulated_balance"]
+                        continue
+                    # Priority 2: Use Plaid API
                     try:
                         balances_data = get_account_balances(account["plaid_token"])
                         # Check if response contains an error
@@ -3692,9 +3573,13 @@ class DashboardMain(QMainWindow):
             except (KeyError, TypeError, AttributeError):
                 commitments = 0
 
-            # Calculate available balance
-            # Available balance = checking balance - unpaid commitments
-            available = checking_balance - commitments
+            # Calculate balances
+            price_after_commitments = checking_balance - commitments  # what's left after paying all unpaid commitments
+            logger.info(
+                f"[overview_cards] user={self.user_id} checking_balance={checking_balance} "
+                f"savings_balance={savings} unpaid_commitments={commitments} "
+                f"price_after_commitments={price_after_commitments}"
+            )
 
             # Get currency
             user_currency = fetch_one("SELECT currency FROM settings WHERE user_id = ?",(self.user_id,))
@@ -3754,7 +3639,7 @@ class DashboardMain(QMainWindow):
             # Price After Commitments always shows as finance card (even with 0.00)
             commitments_card = self.create_finance_card(
                 "Balance After Commitments",
-                f"{currency} {available:,.2f}",
+                f"{currency} {price_after_commitments:,.2f}",
                 "#F59E0B",
                 "warning"
             )
@@ -3763,7 +3648,7 @@ class DashboardMain(QMainWindow):
             if has_main and checking_balance > 0:
                 available_card = self.create_finance_card(
                     " Available Balance",
-                    f"{currency} {available:,.2f}",
+                    f"{currency} {checking_balance:,.2f}",
                     "#10B981",
                     "positive"
                 )
@@ -3822,7 +3707,7 @@ class DashboardMain(QMainWindow):
             # Price After Commitments always shows as finance card (even with 0.00)
             commitments_card = self.create_finance_card(
                 "Balance After Commitments",
-                f"{currency} 0.00",
+                f"{currency} {price_after_commitments:,.2f}",
                 "#F59E0B",
                 "warning"
             )

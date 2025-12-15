@@ -13,12 +13,14 @@ class UserSettings:
         self.settings = self.load_settings()
         
     def load_settings(self):
-        """Load user settings from database"""
-        settings = fetch_one("SELECT * FROM settings WHERE user_id = ?", (self.user_id,))
-        if not settings:
-            # Create default settings for new user
-            settings = self.create_default_settings()
-        return settings
+        """Load user settings from database and normalize to a dict"""
+        settings_row = fetch_one("SELECT * FROM settings WHERE user_id = ?", (self.user_id,))
+        if settings_row:
+            # sqlite3.Row behaves like a mapping but is immutable; copy to dict for updates
+            return dict(settings_row)
+        
+        # Create default settings for new user when none exist
+        return self.create_default_settings()
         
     def create_default_settings(self):
         """Create default settings for new user"""
@@ -48,6 +50,14 @@ class UserSettings:
         execute_query(f"""
             UPDATE settings SET {key} = ? WHERE user_id = ?
         """, (value, self.user_id), commit=True)
+
+    def is_dark_mode_enabled(self):
+        """Return True when dark mode is enabled"""
+        return bool(self.settings.get('dark_mode', 0))
+        
+    def set_dark_mode(self, enabled):
+        """Enable or disable dark mode preference"""
+        self.update_setting('dark_mode', 1 if enabled else 0)
         
     def should_show_tutorial(self):
         """Check if tutorial should be shown"""

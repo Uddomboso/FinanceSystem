@@ -122,10 +122,17 @@ def insert_plaid_transaction(user_id, account_id, txn):
 
     # after insert, try to mark related commitment
     try:
+        matched = False
+        # First try matching by category_id if we have one
         if category_id:
             matched = try_mark_commitment_for_txn(user_id, account_id, category_id, amount, name, date_str)
-            if matched:
-                print(f"✅ Commitment matched for {name}")
+        
+        # If no match by category_id, try Smart Detect by transaction name
+        if not matched:
+            matched = smart_detect_commitment_by_name(user_id, name, amount)
+        
+        if matched:
+            print(f"✅ Commitment matched for {name}")
     except Exception as e:
         print("commitment match error:", e)
 
@@ -271,6 +278,64 @@ def try_mark_commitment_for_txn(user_id, account_id, category_id, amount, name, 
     
     return False
 
+
+def smart_detect_commitment_by_name(user_id, transaction_name, amount):
+    """
+    Smart Detect: Match transaction to commitment by name similarity.
+    This is called when category_id matching fails.
+    Matches transaction name (e.g., "Netflix - REF-ABC123") to commitment category name (e.g., "Netflix")
+    """
+    if not transaction_name:
+        return False
+    
+    name_lower = transaction_name.lower()
+    tol = 1.0  # tolerance 1 USD
+    
+    # Get all unpaid commitments for user
+    try:
+        commitments = fetch_all("""
+            SELECT cc.commitment_id, cc.amount, c.category_name
+            FROM category_commitments cc
+            JOIN categories c ON cc.category_id = c.category_id
+            WHERE cc.user_id = ? AND COALESCE(cc.is_paid, 0) = 0
+        """, (user_id,))
+    except Exception as e:
+        print(f"Error fetching commitments: {e}")
+        return False
+    
+    for c in commitments:
+        try:
+            category_name = (c['category_name'] or '').lower()
+            expected_amount = float(c['amount'] or 0)
+        except (KeyError, TypeError):
+            continue
+        
+        if not category_name:
+            continue
+        
+        # Check if category name appears in transaction name
+        # e.g., "netflix" in "netflix - ref-abc123"
+        if category_name in name_lower:
+            # Also check amount is within tolerance
+            if abs(expected_amount - amount) <= tol:
+                # Mark as paid
+                execute_query("""
+                    UPDATE category_commitments
+                    SET is_paid = 1,
+                        last_paid_date = CURRENT_TIMESTAMP
+                    WHERE commitment_id = ?
+                """, (c['commitment_id'],), commit=True)
+                
+                # Add notification
+                execute_query("""
+                    INSERT INTO notifications (user_id, content, notification_type, created_at)
+                    VALUES (?, ?, 'payment', CURRENT_TIMESTAMP)
+                """, (user_id, f"✅ Smart Detect: {c['category_name']} payment of ${amount:.2f} automatically matched!"), commit=True)
+                
+                print(f"✅ Smart Detect matched '{transaction_name}' to commitment '{c['category_name']}'")
+                return True
+    
+    return False
 
 
 def get_or_create_category(user_id, category_name):
