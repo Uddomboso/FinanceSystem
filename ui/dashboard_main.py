@@ -23,6 +23,7 @@ from ui.components.metrics import MetricChip
 from ui.components.progress import ProgressBar
 from ui.tutorial_system import TutorialManager
 from core.theme_manager import theme_manager
+from assets.styles.penny_colors import PennyColors
 from PyQt5.QtWidgets import QGraphicsDropShadowEffect
 from PyQt5.QtWidgets import QGraphicsOpacityEffect
 from database.db_manager import fetch_all, fetch_one, execute_query
@@ -45,15 +46,35 @@ from core.commitment_manager import (
     get_suggested_amount
 )
 from ui.commitment_form import CommitmentForm, CommitmentSelectionDialog
+from ui.savings_form import SavingsForm
+
 from database.db_manager import fetch_all, fetch_one, execute_query
 from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QSize
 from PyQt5.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QFrame, QSizePolicy, QSpacerItem
 
 
 # --- Define Constants (Crucial for styling) ---
-NAV_BAR_BG_COLOR = "#1F2937"      # Dark background for the navigation and new title bar
-NAV_TEXT_COLOR = "#D1D5DB"       # Light gray text color
-ORANGE_ACCENT = "#F4A446"        # Accent color
+from assets.styles.penny_colors import PennyColors
+
+
+def _nav_palette(theme_name=None):
+    name = theme_name or theme_manager.current_theme
+    return PennyColors.NAV_DARK if name == "dark" else PennyColors.NAV_LIGHT
+
+
+def theme_palette():
+    """Return the global palette for the active theme."""
+    return PennyColors.get_palette(theme_manager.current_theme)
+
+
+def theme_color(token, fallback=None):
+    """Fetch a palette value with optional fallback."""
+    palette = theme_palette()
+    if token in palette:
+        return palette[token]
+    if fallback is not None:
+        return fallback
+    return palette.get("text_primary", "#ffffff")
 # -----------------------------------------------
 
 class NotificationBadge(QLabel):
@@ -63,14 +84,14 @@ class NotificationBadge(QLabel):
         super().__init__(parent)
         self.count = count
         self.setFixedSize(18,18)
-        self.setStyleSheet("""
-            NotificationBadge {
-                background: #EF4444;
-                color: white;
+        self.setStyleSheet(f"""
+            NotificationBadge {{
+                background: {theme_color('error')};
+                color: {theme_color('surface')};
                 border-radius: 9px;
                 font-size: 10px;
                 font-weight: bold;
-            }
+            }}
         """)
         self.setAlignment(Qt.AlignCenter)
         self.update_count(count)
@@ -94,17 +115,20 @@ class CustomTitleBar(QWidget):
         self.main_window = parent
         self.setFixedHeight(30)  # Height of the standard title bar
         self.setMouseTracking(True)
+        self.nav_colors = {}
+        self.apply_palette()
 
-        # Apply the dark background color (#1F2937)
+        self.setup_ui()
+
+    def apply_palette(self):
+        self.nav_colors = _nav_palette()
         self.setStyleSheet(f"""
             CustomTitleBar {{
-                background-color: {NAV_BAR_BG_COLOR};
-                color: {NAV_TEXT_COLOR};
+                background-color: {self.nav_colors['bg']};
+                color: {self.nav_colors['text_secondary']};
                 border: none;
             }}
         """)
-
-        self.setup_ui()
 
     def setup_ui(self):
         layout = QHBoxLayout(self)
@@ -129,7 +153,7 @@ class CustomTitleBar(QWidget):
         btn.setToolTip(tooltip)
 
         try:
-            icon = qta.icon(icon_id, color=NAV_TEXT_COLOR)
+            icon = qta.icon(icon_id, color=self.nav_colors.get("text_secondary", "#FFFFFF"))
             btn.setIcon(icon)
         except Exception as e:
             print(f"Warning: Could not load icon {icon_id}: {e}")
@@ -149,21 +173,40 @@ class CustomTitleBar(QWidget):
                 border: none;
                 padding: 0;
                 border-radius: 3px;
-                color: {NAV_TEXT_COLOR};
+                color: {self.nav_colors.get("text_secondary", "#FFFFFF")};
                 font-weight: bold;
             }}
             QPushButton:hover {{
-                background-color: #374151;
+                background-color: {theme_color('surface_alt')};
             }}
             QPushButton#CloseButton:hover {{
-                background-color: #DC2626;
-                color: white;
+                background-color: {theme_color('error')};
+                color: {theme_color('surface')};
             }}
         """)
         if 'times' in icon_id:
             btn.setObjectName("CloseButton")
 
         return btn
+
+    def refresh_theme(self):
+        self.apply_palette()
+        # Update button icons to match new palette
+        for btn in self.findChildren(QPushButton):
+            icon = btn.icon()
+            if icon.isNull():
+                continue
+            # Recreate icon with updated color where possible
+            data = btn.toolTip().lower()
+            icon_id = (
+                'fa5s.window-minimize' if "minimize" in data else
+                'fa5s.window-maximize' if "maximize" in data else
+                'fa5s.times'
+            )
+            try:
+                btn.setIcon(qta.icon(icon_id, color=self.nav_colors.get("text_secondary", "#FFFFFF")))
+            except Exception:
+                pass
 
     # --- Draggability methods ---
     def mousePressEvent(self, event):
@@ -218,6 +261,10 @@ class MetricsCarousel(QWidget):
         self.user_id = user_id
         self.current_index = 0
         self.metrics_data = []  # Will be populated with real data
+        self.current_available_balance = None
+        self.current_commitments_total = None
+        self.current_price_after_commitments = None
+        self.current_currency = "USD"
         self.setup_ui()
         self.load_real_data()
         self.start_rotation()
@@ -347,7 +394,7 @@ class MetricsCarousel(QWidget):
                 self.savings_card = self.create_finance_card(
                     " Savings Balance",
                     f"{currency} {savings:,.2f}",
-                    "#10B981",
+                    theme_color('success'),
                     "positive"
                 )
             else:
@@ -377,7 +424,7 @@ class MetricsCarousel(QWidget):
             self.commitments_card = self.create_finance_card(
                 "Price After Commitments",
                 f"{currency} {price_after_commitments:,.2f}",
-                "#F59E0B",
+                theme_color('warning'),
                 "warning"
             )
             
@@ -386,7 +433,7 @@ class MetricsCarousel(QWidget):
                 self.available_card = self.create_finance_card(
                     "Available Balance",
                     f"{currency} {available_balance:,.2f}",
-                    "#10B981",
+                    theme_color('success'),
                     "positive"
                 )
             else:
@@ -446,7 +493,7 @@ class MetricsCarousel(QWidget):
             self.commitments_card = self.create_finance_card(
                 "Price After Commitments",
                 f"{currency} 0.00",
-                "#F59E0B",
+                theme_color('warning'),
                 "warning"
             )
 
@@ -591,12 +638,23 @@ class MetricsCarousel(QWidget):
                 commitments = commitments_row["total"] if commitments_row and "total" in commitments_row.keys() and commitments_row["total"] is not None else 0
             except (KeyError, TypeError, AttributeError):
                 commitments = 0
+            logger.info(f"[metrics_carousel_sum] user={self.user_id} unpaid_sum={commitments} row={commitments_row}")
 
             # Calculate balances according to user's logic:
             # Available Balance = checking account balance (money currently in account)
             # Price After Commitments = checking balance - unpaid commitments (what's left after paying all unpaid commitments)
             available_balance = checking_balance  # Available balance IS the checking balance
             price_after_commitments = checking_balance - commitments  # Price after paying all unpaid commitments
+            logger.info(
+                f"[metrics_carousel] user={self.user_id} checking_balance={checking_balance} "
+                f"savings_balance={savings} unpaid_commitments={commitments} "
+                f"available_balance={available_balance} price_after_commitments={price_after_commitments}"
+            )
+            logger.info(
+                f"[commitments] user={self.user_id} checking_balance={checking_balance} "
+                f"savings_balance={savings} unpaid_commitments={commitments} "
+                f"available_balance={available_balance} price_after_commitments={price_after_commitments}"
+            )
 
             # Get currency
             user_currency = fetch_one("SELECT currency FROM settings WHERE user_id = ?",(self.user_id,))
@@ -627,32 +685,43 @@ class MetricsCarousel(QWidget):
                 "avg_progress"] is not None else 0
 
             # Format the data for the carousel
+            neutral_color = theme_color("text_secondary")
             self.metrics_data = [
-                (f"{currency} {available_balance:,.2f}","Available Balance","up" if available_balance > 0 else "neutral" if available_balance == 0 else "down",
-                 "#10B981" if available_balance > 0 else "#6B7280" if available_balance == 0 else "#EF4444"),
-                (f"{currency} {weekly_spending:,.2f}","Weekly Spending","down","#EF4444"),
-                (f"{currency} {savings:,.2f}","Total Savings","up" if savings > 0 else "neutral" if savings == 0 else "down",
-                 "#10B981" if savings > 0 else "#6B7280" if savings == 0 else "#EF4444"),
-                (f"{goals_progress:.0f}%","Goals Progress","up","#3B82F6")
+                (
+                    f"{currency} {available_balance:,.2f}",
+                    "Available Balance",
+                    "up" if available_balance > 0 else "neutral" if available_balance == 0 else "down",
+                    PennyColors.SUCCESS if available_balance > 0 else neutral_color if available_balance == 0 else PennyColors.ERROR
+                ),
+                (f"{currency} {weekly_spending:,.2f}", "Weekly Spending", "down", PennyColors.ERROR),
+                (
+                    f"{currency} {savings:,.2f}",
+                    "Total Savings",
+                    "up" if savings > 0 else "neutral" if savings == 0 else "down",
+                    PennyColors.SUCCESS if savings > 0 else neutral_color if savings == 0 else PennyColors.ERROR
+                ),
+                (f"{goals_progress:.0f}%", "Goals Progress", "up", PennyColors.INFO)
             ]
 
         except Exception as e:
             print(f"Error loading real financial data: {e}")
             # Fallback to demo data if real data fails
+            neutral_color = theme_color("text_secondary")
             self.metrics_data = [
-                ("$2,847.50","Available Balance","up","#10B981"),
-                ("$1,243.75","Weekly Spending","down","#EF4444"),
-                ("$648.20","Total Savings","up","#10B981"),
-                ("72%","Goals Progress","up","#3B82F6")
+                ("$2,847.50","Available Balance","up", PennyColors.SUCCESS),
+                ("$1,243.75","Weekly Spending","down", PennyColors.ERROR),
+                ("$648.20","Total Savings","up", PennyColors.SUCCESS),
+                ("72%","Goals Progress","up", PennyColors.INFO)
             ]
 
     def create_metric_card(self,value,label,trend,color):
         """Create a single metric card"""
+        p = PennyColors.get_palette(theme_manager.current_theme)
         frame = QFrame()
         frame.setStyleSheet(f"""
             QFrame {{
-                background: white;
-                border: 1px solid #E5E7EB;
+                background: {p['surface']};
+                border: 1px solid {p['border']};
                 border-radius: 16px;
                 padding: 25px;
             }}
@@ -684,7 +753,7 @@ class MetricsCarousel(QWidget):
 
         # Label
         label_label = QLabel(label)
-        label_label.setStyleSheet("color: #6B7280; font-size: 14px; font-weight: 500;")
+        label_label.setStyleSheet(f"color: {theme_color('text_secondary')}; font-size: 14px; font-weight: 500;")
 
         layout.addLayout(value_layout)
         layout.addWidget(label_label)
@@ -744,6 +813,11 @@ class MetricsCarousel(QWidget):
     def refresh_data(self):
         """Refresh the carousel with updated data"""
         self.load_real_data()
+        try:
+            if hasattr(self, 'metrics_data') and self.metrics_data:
+                logger.info(f"[metrics_carousel] refresh_data metrics={self.metrics_data}")
+        except Exception:
+            pass
         self.current_index = 0
         self.show_current_metric()
         self.restart_rotation()
@@ -751,15 +825,16 @@ class MetricsCarousel(QWidget):
     def create_finance_card(self,title,value,color,card_type):
         """Create a clean finance card with visible text"""
         card = QFrame()
+        p = theme_palette()
         card.setStyleSheet(f"""
             QFrame {{
-                background: white;
-                border: 1px solid #E5E7EB;
+                background: {p['surface']};
+                border: 1px solid {p['border']};
                 border-radius: 16px;
             }}
             QFrame:hover {{
                 border: 1px solid {color};
-                background: #F9FAFB;
+                background: {p['surface_alt']};
             }}
         """)
         card.setFixedHeight(160)
@@ -774,7 +849,7 @@ class MetricsCarousel(QWidget):
         title_label = QLabel(title)
         title_label.setStyleSheet(f"""
             QLabel {{
-                color: #374151;
+                color: {theme_color('text_primary')};
                 font-size: 16px;
                 font-weight: 600;
                 background: transparent;
@@ -822,6 +897,7 @@ class MetricsCarousel(QWidget):
         card = QFrame()
         card.setFixedHeight(160)
         card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        p = theme_palette()
 
         main_layout = QVBoxLayout(card)
         main_layout.setContentsMargins(30, 25, 30, 25)
@@ -830,39 +906,39 @@ class MetricsCarousel(QWidget):
 
         # Title label
         title_label = QLabel(title)
-        title_label.setStyleSheet("""
-            QLabel {
-                color: #6B7280;
+        title_label.setStyleSheet(f"""
+            QLabel {{
+                color: {theme_color('text_secondary')};
                 font-size: 16px;
                 font-weight: 600;
                 background: transparent;
                 border: none;
-            }
+            }}
         """)
         title_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(title_label)
 
         # Add a visible button instead of just text
-        add_button = QPushButton(button_text)
+        add_button = QPushButton(text)
         add_button.setCursor(Qt.PointingHandCursor)
-        add_button.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #d6733a, stop:1 #b45131);
-                color: white;
+        add_button.setStyleSheet(f"""
+            QPushButton {{
+                background: {theme_color('primary')};
+                color: {theme_color('surface')};
                 border: none;
                 border-radius: 8px;
                 padding: 10px 20px;
+                font-weight: 700;
                 font-size: 14px;
-                font-weight: 600;
                 min-width: 150px;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #e6824a, stop:1 #c56141);
+            }}
+            QPushButton:hover {{
+                background: {theme_color('accent')};
                 transform: scale(1.05);
-            }
-            QPushButton:pressed {
-                background: #b45131;
-            }
+            }}
+            QPushButton:pressed {{
+                background: {theme_color('secondary')};
+            }}
         """)
         add_button.clicked.connect(button_callback)
         main_layout.addWidget(add_button)
@@ -875,16 +951,16 @@ class MetricsCarousel(QWidget):
         card.setCursor(Qt.PointingHandCursor)
 
         # Update card style to show it's clickable
-        card.setStyleSheet("""
-            QFrame {
-                background: white;
-                border: 2px dashed #D1D5DB;
+        card.setStyleSheet(f"""
+            QFrame {{
+                background: {p['surface']};
+                border: 2px dashed {theme_color('border')};
                 border-radius: 16px;
-            }
-            QFrame:hover {
-                border-color: #d6733a;
-                background: #fffaf5;
-            }
+            }}
+            QFrame:hover {{
+                border-color: {theme_color('accent')};
+                background: {p.get('surface_alt', p['surface'])};
+            }}
         """)
 
         # Subtle shadow
@@ -903,82 +979,196 @@ class ModernNavigationBar(QWidget):
 
     def __init__(self,parent=None,logout_callback=None,nav_callbacks=None):
         super().__init__(parent)
+        self.setObjectName("NavRoot")
         self.logout_callback = logout_callback
         self.nav_callbacks = nav_callbacks or {}
         self.setFixedWidth(240)
         self.setContentsMargins(0,0,0,0)
         # Ensure stylesheet background paints for QWidget
         self.setAttribute(Qt.WA_StyledBackground, True)
-
-        # SET THE BACKGROUND COLOR ON THE SIDEBAR
-        self.setStyleSheet("""
-                   ModernNavigationBar {
-                       background-color: #e8d2c4; /* darker shade than #efe3dc */
-                       border-right: 1px solid #e0d3cc;
-                   }
-               """)
-
+        self.setAutoFillBackground(True)
+        self.nav_palette = self.get_nav_palette(theme_manager.current_theme)
         self.setup_ui()
+        self.refresh_theme(theme_manager.current_theme)
+
+    def get_nav_palette(self, theme_name):
+        """Return palette for nav based on theme."""
+        return _nav_palette(theme_name)
+
+    def refresh_theme(self, theme_name=None):
+        """Reapply palette to all nav elements."""
+        if theme_name:
+            self.nav_palette = self.get_nav_palette(theme_name)
+        p = self.nav_palette
+        # Container background
+        self.setStyleSheet(f"""
+            ModernNavigationBar {{
+                background-color: {p['bg']};
+                border-right: 1px solid {p['border']};
+            }}
+            QWidget#NavLogoContainer, QWidget#NavNotifContainer {{
+                background-color: {p['bg']};
+            }}
+        """)
+        pal = self.palette()
+        pal.setColor(QPalette.Window, QColor(p['bg']))
+        self.setPalette(pal)
+
+        # Logo
+        if hasattr(self, "logo_container"):
+            self.logo_container.setStyleSheet(f"""
+                QWidget#NavLogoContainer {{
+                    background-color: {p['bg']};
+                }}
+            """)
+            pal_logo = self.logo_container.palette()
+            pal_logo.setColor(QPalette.Window, QColor(p['bg']))
+            self.logo_container.setPalette(pal_logo)
+        if hasattr(self, "logo_label"):
+            self.logo_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {p['highlight']};
+                    font-weight: bold;
+                    font-size: 18px;
+                    background: {p['bg']};
+                    border-radius: 12px;
+                    padding: 10px;
+                }}
+            """)
+
+        # Notification button
+        if hasattr(self, "notification_container"):
+            self.notification_container.setStyleSheet(f"""
+                QWidget#NavNotifContainer {{
+                    background-color: {p['bg']};
+                }}
+            """)
+            pal_notif = self.notification_container.palette()
+            pal_notif.setColor(QPalette.Window, QColor(p['bg']))
+            self.notification_container.setPalette(pal_notif)
+        if hasattr(self, "notification_btn"):
+            self.notification_btn.setIcon(qta.icon('fa5s.bell', color=p['icon_inactive']))
+            self.notification_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    border: 1px solid {p['notif_border']};
+                    color: {p['icon_inactive']};
+                    border-radius: 8px;
+                }}
+                QPushButton:hover {{ 
+                    background: {p['highlight_bg']};
+                    border-color: {p['highlight']};
+                }}
+            """)
+
+        # Nav buttons
+        if hasattr(self, "nav_buttons"):
+            for text, btn in self.nav_buttons.items():
+                state_icon = qta.icon(
+                    self.nav_data_map.get(text, ""),
+                    color=p["icon_inactive"],
+                    color_checked=p["icon_active"]
+                )
+                btn.setIcon(state_icon)
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: transparent;
+                        color: {p['text_secondary']};
+                        border: none;
+                        border-radius: 8px;
+                        padding: 10px 20px;
+                        font-weight: 500;
+                        font-size: 18px;
+                        text-align: left;
+                    }}
+                    QPushButton:hover {{
+                        color: {p['text_primary']};
+                        background: {p['highlight_bg']};
+                    }}
+                    QPushButton:checked {{
+                        color: {p['highlight']};
+                        font-weight: 600;
+                        background: {p['highlight_bg']};
+                        border-left: 3px solid {p['highlight']};
+                    }}
+                    QPushButton:disabled {{
+                        color: {p['text_disabled']};
+                    }}
+                """)
+
+        # Logout button
+        if hasattr(self, "logout_btn"):
+            self.logout_btn.setIcon(qta.icon('fa5s.sign-out-alt', color=p['icon_inactive']))
+            self.logout_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    color: {p['icon_inactive']};
+                    border: 1px solid {p['notif_border']};
+                    border-radius: 8px;
+                    font-family: 'Poppins', sans-serif;
+                    font-size: 14px;
+                    font-weight: 500;
+                    padding: 8px 16px;
+                }}
+                QPushButton:hover {{ 
+                    background: {p['logout_hover_bg']};
+                    border-color: {p['logout_hover_border']};
+                    color: {p['logout_hover_border']};
+                }}
+                QPushButton:disabled {{
+                    color: {p['text_disabled']};
+                    border-color: {p['text_disabled']};
+                }}
+            """)
 
     def setup_ui(self):
         layout = QVBoxLayout()
         layout.setContentsMargins(0,0,0,0)
         layout.setSpacing(0)
 
-        # Define Dark Colors
-        LIGHT_TEXT = "#704b3b"
-        MEDIUM_TEXT = "#704b3b"
-        ORANGE_ACCENT = "#d6733a"  # active accent
-        ICON_COLOR = "#704b3b"
+        p = self.nav_palette
 
         # Logo section at top
-        logo_container = QWidget()
-        logo_layout = QHBoxLayout(logo_container)
+        self.logo_container = QWidget()
+        self.logo_container.setObjectName("NavLogoContainer")
+        logo_layout = QHBoxLayout(self.logo_container)
         logo_layout.setContentsMargins(20,20,20,20)
+        self.logo_container.setAttribute(Qt.WA_StyledBackground, True)
+        self.logo_container.setAutoFillBackground(True)
+        self.logo_container.setStyleSheet(f"background:{p['bg']};")
+        pal_logo = self.logo_container.palette()
+        pal_logo.setColor(QPalette.Window, QColor(p['bg']))
+        self.logo_container.setPalette(pal_logo)
 
-        logo_label = QLabel("PW")
-        logo_label.setStyleSheet(f"""
-            QLabel {{
-                color: {ORANGE_ACCENT}; 
-                font-weight: bold; 
-                font-size: 18px;
-                background: rgba(244, 164, 70, 0.2);
-                border-radius: 12px;
-                padding: 10px;
-            }}
-        """)
-        logo_label.setAlignment(Qt.AlignCenter)
-        logo_label.setFixedSize(48,48)
-        logo_layout.addWidget(logo_label)
-        layout.addWidget(logo_container)
+        self.logo_label = QLabel("PW")
+        self.logo_label.setObjectName("NavLogoLabel")
+        self.logo_label.setAlignment(Qt.AlignCenter)
+        self.logo_label.setFixedSize(48,48)
+        logo_layout.addWidget(self.logo_label)
+        layout.addWidget(self.logo_container)
 
         # Notification button (moved from bottom) - centered
-        notification_container = QWidget()
-        notification_layout = QHBoxLayout(notification_container)
+        self.notification_container = QWidget()
+        self.notification_container.setObjectName("NavNotifContainer")
+        notification_layout = QHBoxLayout(self.notification_container)
         notification_layout.setContentsMargins(20,0,20,10)
         notification_layout.setAlignment(Qt.AlignCenter)
+        self.notification_container.setAttribute(Qt.WA_StyledBackground, True)
+        self.notification_container.setAutoFillBackground(True)
+        self.notification_container.setStyleSheet(f"background:{p['bg']};")
+        pal_notif = self.notification_container.palette()
+        pal_notif.setColor(QPalette.Window, QColor(p['bg']))
+        self.notification_container.setPalette(pal_notif)
 
         self.notification_btn = QPushButton()
+        self.notification_btn.setObjectName("NavNotifButton")
         self.notification_btn.setFixedSize(40,40)
-        self.notification_btn.setIcon(qta.icon('fa5s.bell',color=ICON_COLOR))
-        self.notification_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                border: 1px solid #e7ddd6;
-                color: {ICON_COLOR};
-                border-radius: 8px;
-            }}
-            QPushButton:hover {{ 
-                background: rgba(214, 115, 58, 0.08);
-                border-color: {ORANGE_ACCENT};
-            }}
-        """)
 
         self.notification_badge = NotificationBadge(3)
         notification_layout.addWidget(self.notification_btn)
         notification_layout.addWidget(self.notification_badge)
         notification_layout.setAlignment(self.notification_badge,Qt.AlignTop | Qt.AlignLeft)
-        layout.addWidget(notification_container)
+        layout.addWidget(self.notification_container)
 
         # Remove separator under logo for a cleaner, more open sidebar
         separator = QFrame()
@@ -991,50 +1181,20 @@ class ModernNavigationBar(QWidget):
         nav_items.setContentsMargins(12,20,12,20)
         nav_items.setSpacing(4)
 
-        nav_data = [
+        self.nav_data_map = dict([
             ("Dashboard", "fa5s.tachometer-alt"),
             ("Transactions", "fa5s.exchange-alt"),
             ("Accounts", "fa5s.money-bill-wave"),
             ("Reports", "fa5s.chart-bar"),
             ("Settings", "fa5s.cog"),
             ("Link Bank", "fa5s.university")
-        ]
+        ])
 
         self.nav_buttons = {}
-        for text,icon_id in nav_data:
+        for text,icon_id in self.nav_data_map.items():
             btn = QPushButton(text)
-
-            state_aware_icon = qta.icon(
-                icon_id,
-                color=ICON_COLOR,
-                color_checked=ORANGE_ACCENT
-            )
-            btn.setIcon(state_aware_icon)
-
             btn.setCheckable(True)
             btn.setFixedHeight(52)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: transparent;
-                    color: {MEDIUM_TEXT};
-                    border: none;
-                    border-radius: 8px;
-                    padding: 10px 20px;
-                    font-weight: 500;
-                    font-size: 18px;
-                    text-align: left;
-                }}
-                QPushButton:hover {{
-                    color: {LIGHT_TEXT};
-                    background: rgba(214, 115, 58, 0.10);
-                }}
-                QPushButton:checked {{
-                    color: {ORANGE_ACCENT};
-                    font-weight: 600;
-                    background: rgba(214, 115, 58, 0.18);
-                    border-left: 3px solid {ORANGE_ACCENT};
-                }}
-            """)
 
             # Connect button to navigation method using callbacks
             if text in self.nav_callbacks:
@@ -1059,33 +1219,18 @@ class ModernNavigationBar(QWidget):
         separator2.setVisible(False)
 
         # Logout button
-        logout_btn = QPushButton("Logout")
-        logout_btn.setIcon(qta.icon('fa5s.sign-out-alt', color=ICON_COLOR))
-        logout_btn.setFixedHeight(40)
-        logout_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {ICON_COLOR};
-                border: 1px solid #e7ddd6;
-                border-radius: 8px;
-                font-family: 'Poppins', sans-serif;
-                font-size: 14px;
-                font-weight: 500;
-                padding: 8px 16px;
-            }}
-            QPushButton:hover {{ 
-                background: rgba(239, 68, 68, 0.1);
-                border-color: #EF4444;
-                color: #EF4444;
-            }}
-        """)
+        self.logout_btn = QPushButton("Logout")
+        self.logout_btn.setFixedHeight(40)
         if self.logout_callback:
-            logout_btn.clicked.connect(self.logout_callback)
-        bottom_section.addWidget(logout_btn)
+            self.logout_btn.clicked.connect(self.logout_callback)
+        bottom_section.addWidget(self.logout_btn)
 
         layout.addStretch()
         layout.addLayout(bottom_section)
         self.setLayout(layout)
+
+        # Apply initial palette styles to all created widgets
+        self.refresh_theme(theme_manager.current_theme)
 
 
 class CommitmentTrackerWidget(QWidget):
@@ -1096,6 +1241,35 @@ class CommitmentTrackerWidget(QWidget):
         print(f"DEBUG: CommitmentTrackerWidget created for user {user_id}")
         self.setup_ui()
         self.load_commitments()
+
+    def trigger_dashboard_refresh(self):
+        """Refresh commitments and balance cards (not whole dashboard)."""
+        if not self.parent_dashboard:
+            return
+
+        if getattr(self, "_is_refreshing", False):
+            return
+
+        self._is_refreshing = True
+        pd = self.parent_dashboard
+        try:
+            # Always refresh commitments grid
+            if hasattr(pd, 'commitment_tracker') and hasattr(pd.commitment_tracker, 'refresh_commitments'):
+                pd.commitment_tracker.refresh_commitments()
+            # Refresh only balance cards/metrics
+            if hasattr(pd, 'refresh_balance_cards'):
+                pd.refresh_balance_cards()
+            else:
+                if hasattr(pd, 'metrics_carousel') and pd.metrics_carousel:
+                    pd.metrics_carousel.refresh_data()
+                    pd.metrics_carousel.refresh_metrics_cards()
+                if hasattr(pd, 'refresh_metrics_cards_main'):
+                    pd.refresh_metrics_cards_main()
+            logger.info("[commitments] refresh cards done (partial)")
+        except Exception as e:
+            logger.warning(f"[commitments] synchronous refresh error: {e}")
+        finally:
+            self._is_refreshing = False
 
     def setup_ui(self):
         """Setup ONLY the commitment tracker widget's internal layout"""
@@ -1135,20 +1309,20 @@ class CommitmentTrackerWidget(QWidget):
         self.add_circle_btn = QPushButton("+")
         self.add_circle_btn.setFixedSize(96,96)
         self.add_circle_btn.setSizePolicy(QSizePolicy.Fixed,QSizePolicy.Fixed)
-        self.add_circle_btn.setStyleSheet("""
-            QPushButton {
+        self.add_circle_btn.setStyleSheet(f"""
+            QPushButton {{
                 background: transparent;
-                border: 2px dashed #D1D5DB;
+                border: 2px dashed {PennyColors.DASHED_BORDER};
                 border-radius: 48px;
-                color: #6B7280;
+                color: {theme_color('text_secondary')};
                 font-weight: 700;
                 font-size: 24px;
-            }
-            QPushButton:hover {
-                background: #F9FAFB;
-                border-color: #3B82F6;
-                color: #3B82F6;
-            }
+            }}
+            QPushButton:hover {{
+                background: {PennyColors.DASHED_BG};
+                border-color: {PennyColors.DASHED_HOVER_BORDER};
+                color: {PennyColors.DASHED_HOVER_BORDER};
+            }}
         """)
         self.add_circle_btn.clicked.connect(self.add_commitment)
         # We'll place this button in grid during load_commitments()
@@ -1157,21 +1331,21 @@ class CommitmentTrackerWidget(QWidget):
         self.savings_setup_btn = QPushButton()
         self.savings_setup_btn.setFixedSize(96,96)
         self.savings_setup_btn.setSizePolicy(QSizePolicy.Fixed,QSizePolicy.Fixed)
-        self.savings_setup_btn.setStyleSheet("""
-            QPushButton {
+        self.savings_setup_btn.setStyleSheet(f"""
+            QPushButton {{
                 background: transparent;
-                border: 2px dashed #D1D5DB;
+                border: 2px dashed {PennyColors.DASHED_BORDER};
                 border-radius: 48px;
-                color: #6B7280;
+                color: {theme_color('text_secondary')};
                 font-weight: 600;
                 font-size: 11px;
                 text-align: center;
-            }
-            QPushButton:hover {
-                background: #F9FAFB;
-                border-color: #D7C6E6;
-                color: #D7C6E6;
-            }
+            }}
+            QPushButton:hover {{
+                background: {PennyColors.DASHED_BG};
+                border-color: {PennyColors.MUTED_LILAC};
+                color: {PennyColors.MUTED_LILAC};
+            }}
         """)
         self.savings_setup_btn.setText("Setup\nsavings\ncommitment")
         self.savings_setup_btn.clicked.connect(self.setup_savings_commitment)
@@ -1193,14 +1367,44 @@ class CommitmentTrackerWidget(QWidget):
 
         try:
             # Use COALESCE to handle NULL is_paid values (treat NULL as 0)
+            # Get unpaid sum independently to avoid join issues
+            unpaid_row = fetch_one("""
+                SELECT COALESCE(SUM(amount), 0) AS total
+                FROM category_commitments
+                WHERE user_id = ? AND COALESCE(is_paid, 0) = 0
+            """, (self.user_id,))
+            unpaid_sum = 0
+            try:
+                unpaid_sum = unpaid_row["total"] if unpaid_row else 0
+            except Exception:
+                unpaid_sum = 0
+
             commitments = fetch_all("""
                 SELECT cc.*, c.category_name, c.color,
                        COALESCE(cc.is_paid, 0) as is_paid
                 FROM category_commitments cc
-                JOIN categories c ON cc.category_id = c.category_id
+                LEFT JOIN categories c ON cc.category_id = c.category_id
                 WHERE cc.user_id = ?
                 ORDER BY COALESCE(cc.is_paid, 0) ASC, cc.amount DESC
             """, (self.user_id,))
+            unpaid_total = 0
+            sample = []
+            for commit in commitments or []:
+                amt = commit["amount"] if "amount" in commit.keys() else 0
+                is_paid_val = commit["is_paid"] if "is_paid" in commit.keys() else 0
+                cat = commit["category_name"] if "category_name" in commit.keys() else ""
+
+                # normalize is_paid to int
+                try:
+                    norm_paid = int(is_paid_val) if is_paid_val is not None else 0
+                except (ValueError, TypeError):
+                    norm_paid = 0
+
+                if norm_paid == 0:
+                    unpaid_total += amt if amt is not None else 0
+                if len(sample) < 5:
+                    sample.append({"cat": cat, "amt": amt, "is_paid": norm_paid})
+            logger.info(f"[commitments] fetched {len(commitments) if commitments else 0} commitments for user={self.user_id} unpaid_total={unpaid_total} sample={sample} unpaid_sum_query={unpaid_sum}")
             
             # Check if there's a Savings commitment - handle sqlite3.Row and None values
             has_savings = False
@@ -1219,13 +1423,13 @@ class CommitmentTrackerWidget(QWidget):
             if not commitments:
                 empty_label = QLabel("No active commitments\nAdd recurring payments like Netflix, Spotify, etc.")
                 empty_label.setAlignment(Qt.AlignCenter)
-                empty_label.setStyleSheet("""
-                    color: #6B7280;
+                empty_label.setStyleSheet(f"""
+                    color: {theme_color('text_secondary')};
                     font-size: 14px;
                     padding: 40px;
-                    background: #F9FAFB;
+                    background: {theme_color('surface_alt')};
                     border-radius: 12px;
-                    border: 2px dashed #E5E7EB;
+                    border: 2px dashed {theme_color('border')};
                 """)
                 empty_label.setMinimumHeight(120)
                 # place the savings setup button, add circle and empty message
@@ -1241,9 +1445,9 @@ class CommitmentTrackerWidget(QWidget):
             for commitment in commitments:
                 # Handle sqlite3.Row object - use bracket notation with safety checks
                 try:
-                    color = commitment['color'] if 'color' in commitment.keys() and commitment['color'] else '#6B7280'
+                    color = commitment['color'] if 'color' in commitment.keys() and commitment['color'] else theme_color('text_secondary')
                 except (KeyError, TypeError):
-                    color = '#6B7280'
+                    color = theme_color('text_secondary')
                 
                 try:
                     due_day = commitment['due_day'] if 'due_day' in commitment.keys() and commitment['due_day'] else 1
@@ -1311,6 +1515,7 @@ class CommitmentTrackerWidget(QWidget):
 
             # Add the "+" circle at the next slot
             self.commitments_layout.addWidget(self.add_circle_btn, row, col, alignment=Qt.AlignCenter)
+            logger.info(f"[commitments] rendered grid items rows={row+1} cols_used={col+1} has_savings={has_savings}")
 
         except Exception as e:
             # Print the actual error for debugging
@@ -1320,32 +1525,48 @@ class CommitmentTrackerWidget(QWidget):
             
             error_label = QLabel(f"Unable to load commitments\nError: {str(e)}\nPlease try again later")
             error_label.setAlignment(Qt.AlignCenter)
-            error_label.setStyleSheet("""
-                color: #6B7280;
+            error_label.setStyleSheet(f"""
+                color: {theme_color('text_secondary')};
                 font-size: 14px;
                 padding: 40px;
-                background: #F9FAFB;
+                background: {theme_color('surface_alt')};
                 border-radius: 12px;
-                border: 2px dashed #E5E7EB;
+                border: 2px dashed {theme_color('border')};
             """)
             self.commitments_layout.addWidget(error_label, 0, 0)
 
 
 
 
+
+    def refresh_commitments(self):
+        """Public helper to reload commitments safely."""
+        self.load_commitments()
+
+    def setup_savings_commitment(self):
+        """Open the savings goal form and refresh commitments afterward."""
+        try:
+            dlg = SavingsForm(self.user_id, parent_dashboard=self.parent_dashboard)
+            dlg.exec_()
+            self.load_commitments()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to open savings setup: {e}")
+
     def create_commitment_widget(self,category_name,amount,commitment_id,category_id,color,due_day):
         """Create a legacy row-style widget (retained but unused)."""
         widget = QFrame()
+        p = theme_palette()
+        border_color = theme_color('commitment_border', p['border'])
         widget.setStyleSheet(f"""
             QFrame {{
-                background: white;
-                border: 1px solid #E5E7EB;
+                background: {theme_color('commitment_bg', p['surface'])};
+                border: 1px solid {border_color};
                 border-radius: 12px;
                 padding: 16px;
             }}
             QFrame:hover {{
                 border-color: {color};
-                background: #F9FAFB;
+                background: {theme_color('surface_alt')};
             }}
         """)
 
@@ -1367,15 +1588,15 @@ class CommitmentTrackerWidget(QWidget):
         details_layout.setSpacing(4)
 
         name_label = QLabel(category_name)
-        name_label.setStyleSheet("font-weight: 600; color: #374151; font-size: 14px;")
+        name_label.setStyleSheet(f"font-weight: 600; color: {theme_color('text_primary')}; font-size: 14px;")
 
         amount_label = QLabel(f"${amount:.2f}/month")
-        amount_label.setStyleSheet("color: #6B7280; font-size: 13px;")
+        amount_label.setStyleSheet(f"color: {theme_color('text_secondary')}; font-size: 13px;")
 
         # Status with due day information
         today = datetime.now().day
         status_text = "🔄 Due today!" if today == due_day else f"📅 Due day {due_day}"
-        status_color = "#EF4444" if today == due_day else "#F59E0B"
+        status_color = theme_color('error') if today == due_day else theme_color('warning')
 
         status_label = QLabel(status_text)
         status_label.setStyleSheet(f"color: {status_color}; font-size: 12px; font-weight: 500;")
@@ -1394,36 +1615,36 @@ class CommitmentTrackerWidget(QWidget):
         # Mark as paid button
         pay_btn = QPushButton("Mark Paid")
         pay_btn.setFixedSize(80,32)
-        pay_btn.setStyleSheet("""
-            QPushButton {
-                background: #10B981;
-                color: white;
+        pay_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {theme_color('success')};
+                color: {theme_color('background')};
                 border: none;
                 border-radius: 6px;
                 font-size: 12px;
                 font-weight: 600;
-            }
-            QPushButton:hover {
-                background: #059669;
-            }
+            }}
+            QPushButton:hover {{
+                background: {theme_color('secondary', theme_color('success'))};
+            }}
         """)
         pay_btn.clicked.connect(lambda: self.mark_as_paid(commitment_id,category_name))
 
         # Remove button
         remove_btn = QPushButton("Remove")
         remove_btn.setFixedSize(70,32)
-        remove_btn.setStyleSheet("""
-            QPushButton {
-                background: #6B7280;
-                color: white;
+        remove_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {theme_color('muted')};
+                color: {theme_color('background')};
                 border: none;
                 border-radius: 6px;
                 font-size: 12px;
                 font-weight: 600;
-            }
-            QPushButton:hover {
-                background: #4B5563;
-            }
+            }}
+            QPushButton:hover {{
+                background: {theme_color('text_secondary')};
+            }}
         """)
         remove_btn.clicked.connect(lambda: self.remove_commitment(commitment_id))
 
@@ -1466,12 +1687,12 @@ class CommitmentTrackerWidget(QWidget):
             return '#E8E3DC'
 
         pastel_bg = get_muted_pastel_color(category_name, color)
-        accent = '#e89574'  # reserved soft terracotta for emphasis
-        neutral_ring = '#e7ddd6'
+        accent = theme_color('accent')
+        neutral_ring = theme_color('border')
         
         # For paid commitments, use brown ring
         if is_paid:
-            ring = '#8B4513'  # Brown for paid commitments
+            ring = theme_color('text_secondary')
         else:
             # ring color: accent if due today, otherwise neutral
             ring = accent if datetime.now().day == (due_day or 1) else neutral_ring
@@ -1482,7 +1703,7 @@ class CommitmentTrackerWidget(QWidget):
         # For paid commitments, show brown checkmark instead of amount
         if is_paid:
             # Create brown checkmark icon (check-circle in brown) - smaller size
-            check_icon = qta.icon('fa5s.check-circle', color='#8B4513')  # Brown color
+            check_icon = qta.icon('fa5s.check-circle', color=theme_color('text_secondary'))
             btn.setIcon(check_icon)
             btn.setIconSize(QSize(24, 24))  # Reduced from 36x36 to 24x24
             # Icon alignment: centered horizontally, positioned above text
@@ -1520,7 +1741,7 @@ class CommitmentTrackerWidget(QWidget):
         btn.setStyleSheet(f"""
             QPushButton {{
                 background: {pastel_bg};
-                color: #704b3b;
+                color: {theme_color('text_primary')};
                 border: 3px solid {ring};
                 border-radius: 48px;
                 font-weight: 600;
@@ -1603,8 +1824,8 @@ class CommitmentTrackerWidget(QWidget):
             # Style menu with colored items using object names
             menu.setStyleSheet(f"""
                 QMenu {{
-                    background-color: {PennyColors.SURFACE};
-                    border: 1px solid #E5E7EB;
+                    background-color: {theme_color('surface')};
+                    border: 1px solid {theme_color('border')};
                     border-radius: 8px;
                     padding: 4px;
                 }}
@@ -1612,31 +1833,31 @@ class CommitmentTrackerWidget(QWidget):
                     padding: 10px 20px;
                     font-family: 'Segoe UI', system-ui, sans-serif;
                     font-size: 14px;
-                    color: {PennyColors.TEXT_PRIMARY};
+                    color: {theme_color('text_primary')};
                     border-radius: 6px;
                 }}
                 QMenu::item:selected {{
-                    background-color: #F3F4F6;
+                    background-color: {theme_color('surface_alt')};
                 }}
                 QMenu::item[objectName="mark_paid_action"] {{
-                    color: {PennyColors.TEXT_PRIMARY};
+                    color: {theme_color('text_primary')};
                 }}
                 QMenu::item[objectName="smart_detect_action"] {{
-                    color: {PennyColors.INFO};
+                    color: {theme_color('info')};
                 }}
                 QMenu::item[objectName="pay_as_you_go_action"] {{
-                    color: {PennyColors.PRIMARY};
+                    color: {theme_color('primary')};
                 }}
                 QMenu::item[objectName="unmark_paid_action"] {{
-                    color: {PennyColors.WARNING};
+                    color: {theme_color('warning')};
                 }}
                 QMenu::item[objectName="delete_category_action"] {{
-                    color: {PennyColors.ERROR};
+                    color: {theme_color('error')};
                     font-weight: 600;
                 }}
                 QMenu::separator {{
                     height: 1px;
-                    background-color: #E5E7EB;
+                    background-color: {theme_color('border')};
                     margin: 4px 8px;
                 }}
             """)
@@ -1718,8 +1939,7 @@ class CommitmentTrackerWidget(QWidget):
             QMessageBox.information(self, "Success", f"{category_name} marked as unpaid")
             self.load_commitments()
             # Refresh dashboard metrics to update price after commitments
-            if self.parent_dashboard:
-                self.parent_dashboard.refresh_dashboard()
+            self.trigger_dashboard_refresh()
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to unmark as paid: {str(e)}")
             import traceback
@@ -1735,13 +1955,7 @@ class CommitmentTrackerWidget(QWidget):
                 QMessageBox.information(self,"Success",f"{category_name} marked as paid!")
                 self.load_commitments()
                 # Refresh dashboard metrics to update available balance IMMEDIATELY
-                if self.parent_dashboard:
-                    self.parent_dashboard.refresh_dashboard()
-                    # CRITICAL: Explicitly refresh metrics cards to update "Price After Commitments"
-                    if hasattr(self.parent_dashboard, 'refresh_metrics_cards_main'):
-                        self.parent_dashboard.refresh_metrics_cards_main()
-                    if hasattr(self.parent_dashboard, 'metrics_carousel'):
-                        self.parent_dashboard.metrics_carousel.refresh_metrics_cards()
+                self.trigger_dashboard_refresh()
                 # Trigger commitment check to update notifications (after refresh)
                 from core.commitment_manager import check_commitments
                 check_commitments(self.user_id)
@@ -1874,10 +2088,10 @@ class CommitmentTrackerWidget(QWidget):
                                     margin: 5px;
                                     font-size: 13px;
                                 }
-                                QRadioButton:checked {
-                                    background-color: #E3F2FD;
+                                QRadioButton:checked {{
+                                    background-color: {theme_color('surface_alt')};
                                     border-radius: 4px;
-                                }
+                                }}
                             """)
                             button_group.addButton(radio, i)
                             radio_buttons.append(radio)
@@ -1900,17 +2114,17 @@ class CommitmentTrackerWidget(QWidget):
                     button_layout.addWidget(cancel_btn)
                     
                     select_btn = QPushButton("Mark Selected as Paid")
-                    select_btn.setStyleSheet("""
-                        QPushButton {
-                            background-color: #2563EB;
-                            color: white;
+                    select_btn.setStyleSheet(f"""
+                        QPushButton {{
+                            background-color: {theme_color('primary')};
+                            color: {theme_color('surface')};
                             padding: 8px 16px;
                             border-radius: 6px;
                             font-weight: 600;
-                        }
-                        QPushButton:hover {
-                            background-color: #1D4ED8;
-                        }
+                        }}
+                        QPushButton:hover {{
+                            background-color: {theme_color('accent', theme_color('primary'))};
+                        }}
                     """)
                     select_btn.clicked.connect(dialog.accept)
                     button_layout.addWidget(select_btn)
@@ -2030,7 +2244,7 @@ class CommitmentTrackerWidget(QWidget):
                 else:
                     no_txn_label = QLabel("No recent transactions found. You can mark this commitment as paid manually.")
                     no_txn_label.setWordWrap(True)
-                    no_txn_label.setStyleSheet("font-size: 13px; color: #6B7280; padding: 10px;")
+                    no_txn_label.setStyleSheet(f"font-size: 13px; color: {theme_color('text_secondary')}; padding: 10px;")
                     layout.addWidget(no_txn_label)
                 
                 button_layout = QHBoxLayout()
@@ -2041,17 +2255,17 @@ class CommitmentTrackerWidget(QWidget):
                 button_layout.addWidget(cancel_btn)
                 
                 select_btn = QPushButton("Mark Selected as Paid" if recent_txns else "Mark as Paid Manually")
-                select_btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #2563EB;
-                        color: white;
+                select_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {theme_color('primary')};
+                        color: {theme_color('surface')};
                         padding: 8px 16px;
                         border-radius: 6px;
                         font-weight: 600;
-                    }
-                    QPushButton:hover {
-                        background-color: #1D4ED8;
-                    }
+                    }}
+                    QPushButton:hover {{
+                        background-color: {theme_color('accent', theme_color('primary'))};
+                    }}
                 """)
                 select_btn.clicked.connect(dialog.accept)
                 button_layout.addWidget(select_btn)
@@ -2247,8 +2461,7 @@ class CommitmentTrackerWidget(QWidget):
             )
             self.load_commitments()
             # Refresh dashboard metrics to update available balance
-            if self.parent_dashboard:
-                self.parent_dashboard.refresh_dashboard()
+            self.trigger_dashboard_refresh()
 
     def add_commitment(self):
         """Open modern commitment selection dialog"""
@@ -2269,175 +2482,20 @@ class CommitmentTrackerWidget(QWidget):
             return
 
         # Show modern commitment form
-        dlg = CommitmentForm(self.user_id, parent_dashboard=self.parent_dashboard)
-        if dlg.exec_():
-            # Commitment is saved in the form itself
+        dlg = CommitmentForm(self.user_id, parent_dashboard=self.parent_dashboard, category_name="Custom Commitment")
+        if hasattr(dlg, 'commitment_added'):
+            dlg.commitment_added.connect(self.handle_commitment_added_signal)
+
+        result = dlg.exec_()
+        if result == QDialog.Accepted:
+            # Reload commitments so the new entry appears immediately
             self.load_commitments()
-            # Refresh dashboard metrics
-            if self.parent_dashboard:
-                self.parent_dashboard.refresh_dashboard()
-            return
-            
-            # Old code below - remove if not needed
-            # Handle the selected commitment
-            if item.get("is_custom", False):
-                # Create custom commitment
-                custom_name = item["name"]
-                amount = item["amount"]
-                
-                # Create category first
-                execute_query("""
-                    INSERT INTO categories (user_id, category_name, color, budget_amount)
-                    VALUES (?, ?, ?, ?)
-                """,(
-                    self.user_id,
-                    custom_name,
-                    self.get_category_color(custom_name.lower()),
-                    amount
-                ),commit=True)
-
-                # Get the new category ID
-                category = fetch_one(
-                    "SELECT category_id FROM categories WHERE category_name = ? AND user_id = ?",
-                    (custom_name,self.user_id)
-                )
-
-                if category:
-                    # Create commitment
-                    from core.commitment_manager import create_commitment
-                    create_commitment(self.user_id,category['category_id'],custom_name,amount)
-                    QMessageBox.information(self,"Commitment Created",
-                                            f"✅ ${amount:,.2f} commitment set for {custom_name}!")
-                    self.load_commitments()
-                    # Refresh dashboard metrics to update available balance
-                    if self.parent_dashboard:
-                        self.parent_dashboard.refresh_dashboard()
-            else:
-                # Quick add common commitment
-                common_name_map = {
-                    "Netflix": "netflix",
-                    "Spotify": "spotify",
-                    "Amazon Prime": "amazon",
-                    "Gym Membership": "gym",
-                    "Internet": "internet",
-                    "Phone Bill": "phone"
-                }
-                
-                commitment_name = item["name"]
-                category_type = common_name_map.get(commitment_name, "other")
-                amount = item["amount"]
-                self.create_quick_commitment(commitment_name, category_type, amount)
-
-    def create_custom_commitment(self):
-        """Fallback method to create custom commitment"""
-        category_name,ok = QInputDialog.getText(
-            self,"Custom Commitment","Enter category name:"
-        )
-
-        if ok and category_name:
-            amount,ok = QInputDialog.getDouble(
-                self,"Monthly Amount",
-                f"Enter monthly amount for {category_name}:",
-                value=50.00,min=1.00,max=1000.00,decimals=2
-            )
-
-            if ok and amount > 0:
-                # Create category first
-                execute_query("""
-                    INSERT INTO categories (user_id, category_name, color, budget_amount)
-                    VALUES (?, ?, ?, ?)
-                """,(
-                    self.user_id,
-                    category_name,
-                    self.get_category_color(category_name.lower()),
-                    amount
-                ),commit=True)
-
-                # Get the new category ID
-                category = fetch_one(
-                    "SELECT category_id FROM categories WHERE category_name = ? AND user_id = ?",
-                    (category_name,self.user_id)
-                )
-
-                if category:
-                    # Create commitment
-                    from core.commitment_manager import create_commitment
-                    create_commitment(self.user_id,category['category_id'],category_name,amount)
-                    QMessageBox.information(self,"Commitment Created",
-                                            f"✅ ${amount} monthly commitment set for {category_name}!")
-                    self.load_commitments()
-                    # Refresh dashboard metrics to update available balance
-                    if self.parent_dashboard:
-                        self.parent_dashboard.refresh_dashboard()
-
-    def create_quick_commitment(self,category_name,category_type,amount):
-        """Quickly create a commitment for common services"""
-        # Check if category exists, if not create it
-        category = fetch_one(
-            "SELECT category_id FROM categories WHERE category_name = ? AND user_id = ?",
-            (category_name,self.user_id)
-        )
-
-        if not category:
-            # Create the category first
-            execute_query("""
-                INSERT INTO categories (user_id, category_name, color, budget_amount)
-                VALUES (?, ?, ?, ?)
-            """,(
-                self.user_id,
-                category_name,
-                self.get_category_color(category_type),
-                amount
-            ),commit=True)
-
-            category = fetch_one(
-                "SELECT category_id FROM categories WHERE category_name = ? AND user_id = ?",
-                (category_name,self.user_id)
-            )
-
-        if category:
-            from core.commitment_manager import create_commitment
-            create_commitment(self.user_id,category['category_id'],category_name,amount)
-            QMessageBox.information(self,"Commitment Created",
-                                    f"✅ ${amount} monthly commitment set for {category_name}!\n\n"
-                                    f"When a transaction matches '{category_name}', it will be automatically marked as paid.")
-            self.load_commitments()
-            # Refresh dashboard metrics to update available balance
-            if self.parent_dashboard:
-                self.parent_dashboard.refresh_dashboard()
-
-    def get_category_color(self,category_type):
-        """Get color for common commitment categories"""
-        colors = {
-            'netflix': '#E50914',
-            'spotify': '#1DB954',
-            'amazon': '#FF9900',
-            'gym': '#8B5CF6',
-            'internet': '#3B82F6',
-            'phone': '#10B981'
-        }
-        return colors.get(category_type,'#6B7280')
-
-    def refresh_commitments(self):
-        """Public method to refresh commitments data"""
-        self.load_commitments()
-        # Also run commitment checks for due dates
-        from core.commitment_manager import check_commitments
-        check_commitments(self.user_id)
-
-    def setup_savings_commitment(self):
-        """Open commitment form for Savings category"""
-        try:
-            from ui.commitment_form import CommitmentForm
-            dlg = CommitmentForm(self.user_id, "Savings")
-            if dlg.exec_():
-                self.load_commitments()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to open savings commitment form: {e}")
-
-
-
-
+            self.trigger_dashboard_refresh()
+    def handle_commitment_added_signal(self, amount):
+        """Forward commitment delta to the main dashboard if available."""
+        if self.parent_dashboard and hasattr(self.parent_dashboard, 'handle_commitment_delta'):
+            self.parent_dashboard.handle_commitment_delta(amount)
+        self.trigger_dashboard_refresh()
 
 
 class DashboardMain(QMainWindow):
@@ -2467,11 +2525,7 @@ class DashboardMain(QMainWindow):
     def setup_window(self):
         self.setWindowTitle(f"PennyWise - {self.username}'s Dashboard")
         self.setMinimumSize(1200,800)
-        self.setStyleSheet("""
-            QMainWindow {
-                background: #F9FAFB;
-            }
-        """)
+        # Let the app stylesheet control the window background (no inline override)
 
         # Remove the default title bar
         self.setWindowFlags(Qt.FramelessWindowHint)
@@ -2499,15 +2553,145 @@ class DashboardMain(QMainWindow):
             if self.stack.currentWidget() == self.page_dashboard:
                 if hasattr(self, 'recent_transactions_layout'):
                     self.refresh_recent_transactions()
+        try:
+            logger.info("[dashboard] refresh_dashboard completed")
+        except Exception:
+            pass
     
     def refresh_metrics_cards_main(self):
         """Refresh the metrics cards in DashboardMain (not MetricsCarousel)"""
         if hasattr(self, 'metrics_carousel'):
             self.metrics_carousel.refresh_metrics_cards()
+            try:
+                # Log current metrics values if available
+                if hasattr(self.metrics_carousel, 'metrics_data') and self.metrics_carousel.metrics_data:
+                    logger.info(f"[dashboard] metrics_cards_main refreshed with {len(self.metrics_carousel.metrics_data)} cards")
+            except Exception:
+                pass
 
         # Run commitment checks for due dates
         from core.commitment_manager import check_commitments
         check_commitments(self.user_id)
+
+    def refresh_balance_cards(self):
+        """Refresh only balance-related cards quickly."""
+        try:
+            self.rebuild_overview_cards()
+            # Force UI repaint
+            try:
+                from PyQt5.QtWidgets import QApplication
+                QApplication.processEvents()
+            except Exception:
+                pass
+            logger.info("[dashboard] refresh_balance_cards completed")
+        except Exception as e:
+            logger.warning(f"[dashboard] refresh_balance_cards error: {e}")
+
+    def rebuild_overview_cards(self):
+        """Rebuild the top balance cards with fresh data."""
+        try:
+            from database.db_manager import fetch_one
+
+            # Compute checking balance from transactions (fallback approach)
+            checking_balance_row = fetch_one("""
+                SELECT SUM(
+                    CASE 
+                        WHEN transaction_type = 'income' THEN amount 
+                        WHEN transaction_type = 'expense' THEN -amount 
+                        ELSE 0 
+                    END
+                ) as balance
+                FROM transactions
+                WHERE user_id = ?
+            """,(self.user_id,))
+            checking_balance = checking_balance_row["balance"] if checking_balance_row and checking_balance_row["balance"] is not None else 0
+
+            # Compute savings from transactions tagged Savings (income)
+            savings_row = fetch_one("""
+                SELECT COALESCE(SUM(t.amount), 0) AS total
+                FROM transactions t
+                LEFT JOIN categories c ON t.category_id = c.category_id
+                WHERE t.user_id = ? 
+                AND t.transaction_type = 'income'
+                AND c.category_name = 'Savings'
+            """,(self.user_id,))
+            savings = savings_row["total"] if savings_row and savings_row["total"] is not None else 0
+
+            # Compute unpaid commitments sum
+            unpaid_row = fetch_one("""
+                SELECT COALESCE(SUM(amount), 0) AS total
+                FROM category_commitments
+                WHERE user_id = ? AND COALESCE(is_paid, 0) = 0
+            """,(self.user_id,))
+            unpaid_sum = unpaid_row["total"] if unpaid_row and unpaid_row["total"] is not None else 0
+
+            # Currency
+            user_currency = fetch_one("SELECT currency FROM settings WHERE user_id = ?",(self.user_id,))
+            try:
+                currency = user_currency["currency"] if user_currency and "currency" in user_currency.keys() else "USD"
+            except (KeyError, TypeError, AttributeError):
+                currency = "USD"
+
+            # Balances
+            available_balance = checking_balance
+            price_after_commitments = checking_balance - unpaid_sum
+
+            logger.info(f"[overview_rebuild] user={self.user_id} checking={checking_balance} savings={savings} unpaid={unpaid_sum} price_after={price_after_commitments}")
+
+            # Clear existing overview layout
+            if hasattr(self, 'overview_layout'):
+                while self.overview_layout.count():
+                    item = self.overview_layout.takeAt(0)
+                    w = item.widget()
+                    if w:
+                        w.deleteLater()
+
+                savings_card = self.create_finance_card(
+                    "Savings Balance",
+                    f"{currency} {savings:,.2f}",
+                    theme_color('success'),
+                    "positive"
+                )
+
+                commitments_card = self.create_finance_card(
+                    "Balance After Commitments",
+                    f"{currency} {price_after_commitments:,.2f}",
+                    theme_color('warning'),
+                    "warning"
+                )
+                commitments_card.setFixedHeight(180)
+
+                available_card = self.create_finance_card(
+                    "Available Balance",
+                    f"{currency} {available_balance:,.2f}",
+                    theme_color('success'),
+                    "positive"
+                )
+
+                self.overview_layout.addWidget(savings_card)
+                self.overview_layout.addWidget(commitments_card)
+                self.overview_layout.addWidget(available_card)
+
+        except Exception as e:
+            logger.warning(f"[overview_rebuild] error: {e}")
+
+    def force_full_refresh(self):
+        """Force a comprehensive, synchronous refresh of dashboard data."""
+        try:
+            # Refresh core dashboard data
+            self.refresh_dashboard()
+            # Ensure metrics data/cards are refreshed
+            if hasattr(self, 'metrics_carousel'):
+                self.metrics_carousel.refresh_data()
+                self.metrics_carousel.refresh_metrics_cards()
+            # Ensure commitments widget re-renders
+            if hasattr(self, 'commitment_tracker'):
+                self.commitment_tracker.refresh_commitments()
+            # Optionally update dashboard layout
+            self.update_dashboard()
+            logger.info("[dashboard] force_full_refresh completed")
+        except Exception as e:
+            logger.warning(f"[dashboard] force_full_refresh error: {e}")
 
     def update_dashboard(self):
         """Rebuild the dashboard page to reflect latest data"""
@@ -2522,6 +2706,19 @@ class DashboardMain(QMainWindow):
         
         # Refresh accounts page to show newly linked accounts
         self.refresh_accounts_page()
+
+    def force_quick_refresh(self):
+        """Lightweight refresh for commitments and balance cards only."""
+        # Refresh commitments
+        if hasattr(self, 'commitment_tracker'):
+            self.commitment_tracker.refresh_commitments()
+        # Refresh metrics data/cards without rebuilding pages
+        if hasattr(self, 'metrics_carousel'):
+            self.metrics_carousel.refresh_data()
+            self.metrics_carousel.refresh_metrics_cards()
+        # Refresh main metrics cards
+        if hasattr(self, 'refresh_metrics_cards_main'):
+            self.refresh_metrics_cards_main()
 
     def logout(self):
         """Handle logout functionality"""
@@ -2588,7 +2785,8 @@ class DashboardMain(QMainWindow):
     def build_dashboard_page(self):
         """Build the main dashboard page"""
         content_container = QWidget()
-        content_container.setStyleSheet("background: #f9f7f5;")
+        self.dashboard_content_container = content_container
+        content_container.setStyleSheet(f"background: {theme_color('background')}; color: {theme_color('text_primary')};")
         content_layout = QVBoxLayout(content_container)
         
         # Content padding
@@ -2605,8 +2803,9 @@ class DashboardMain(QMainWindow):
         
         # --- Monthly Commitments Section ---
         commitment_title = QLabel(" Monthly Commitments")
+        self.commitment_title = commitment_title
         commitment_title.setFont(QFont("Segoe UI",18,QFont.Bold))
-        commitment_title.setStyleSheet("color: #1F2937; margin-top: 15px;")
+        commitment_title.setStyleSheet(f"color: {theme_color('text_primary')}; margin-top: 15px;")
         content_layout.addWidget(commitment_title)
         
         try:
@@ -2624,8 +2823,14 @@ class DashboardMain(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll_bg = theme_color('background')
+        scroll.setStyleSheet(f"QScrollArea {{ border: none; background: transparent; }}")
+        scroll.viewport().setAutoFillBackground(True)
+        vp_pal = scroll.viewport().palette()
+        vp_pal.setColor(QPalette.Window, QColor(scroll_bg))
+        scroll.viewport().setPalette(vp_pal)
         scroll.setWidget(content_container)
+        self.dashboard_scroll = scroll
         
         return scroll
 
@@ -2647,7 +2852,8 @@ class DashboardMain(QMainWindow):
         from assets.styles.penny_colors import PennyColors
         
         page = QWidget()
-        page.setStyleSheet(f"background: {PennyColors.BACKGROUND};")
+        page.setStyleSheet(f"background: {theme_color('background')};")
+        self.accounts_page_widget = page
         main_layout = QVBoxLayout(page)
         main_layout.setContentsMargins(24, 16, 24, 24)
         main_layout.setSpacing(16)
@@ -2656,7 +2862,7 @@ class DashboardMain(QMainWindow):
         header_layout = QHBoxLayout()
         title = QLabel("Accounts")
         title.setFont(QFont("Segoe UI", 28, QFont.Bold))
-        title.setStyleSheet(f"color: {PennyColors.TEXT_PRIMARY}; padding: 0; margin: 0;")
+        title.setStyleSheet(f"color: {theme_color('text_primary')}; padding: 0; margin: 0;")
         header_layout.addWidget(title)
         header_layout.addStretch()
         
@@ -2664,18 +2870,18 @@ class DashboardMain(QMainWindow):
         link_btn = QPushButton("+ Link Account")
         link_btn.setStyleSheet(f"""
             QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #d6733a, stop:1 #b45131);
-                color: white;
+                background: {PennyColors.CTA_GRADIENT};
+                color: {PennyColors.SURFACE};
                 padding: 8px 12px;
                 border-radius: 10px;
                 font-weight: 600;
                 font-size: 14px;
             }}
             QPushButton:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #e6824a, stop:1 #c56141);
+                background: {PennyColors.CTA_GRADIENT_HOVER};
             }}
             QPushButton:pressed {{
-                background: #b45131;
+                background: {PennyColors.CTA_PRESSED};
             }}
         """)
         link_btn.clicked.connect(lambda: self.show_link_bank())
@@ -2685,16 +2891,22 @@ class DashboardMain(QMainWindow):
         
         # Info label
         info_label = QLabel("Click an account to manage it. Set as Listings Account or Savings Account.")
-        info_label.setStyleSheet(f"color: {PennyColors.TEXT_SECONDARY}; font-size: 12px; padding: 4px 0 8px 0;")
+        info_label.setStyleSheet(f"color: {theme_color('text_secondary')}; font-size: 12px; padding: 4px 0 8px 0;")
         main_layout.addWidget(info_label)
         
         # Scroll area for accounts
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(f"QScrollArea {{ border: none; background: {PennyColors.BACKGROUND}; }}")
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; } QScrollArea::viewport { background: transparent; }")
+        scroll.viewport().setAutoFillBackground(True)
+        vp_pal = scroll.viewport().palette()
+        vp_pal.setColor(QPalette.Window, QColor(theme_color('background')))
+        scroll.viewport().setPalette(vp_pal)
         
         scroll_content = QWidget()
-        scroll_content.setStyleSheet(f"background: {PennyColors.BACKGROUND};")
+        scroll_content.setStyleSheet(f"background: {theme_color('background')};")
+        self.accounts_scroll_content = scroll_content
+        self.accounts_scroll_content = scroll_content
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setContentsMargins(0, 0, 0, 0)
         scroll_layout.setSpacing(12)
@@ -2760,8 +2972,8 @@ class DashboardMain(QMainWindow):
             
             no_accounts_icon = QLabel()
             try:
-                no_accounts_icon.setPixmap(qta.icon('fa5s.university', color=PennyColors.TEXT_SECONDARY).pixmap(64, 64))
-            except:
+                no_accounts_icon.setPixmap(qta.icon('fa5s.university', color=theme_color('text_secondary')).pixmap(64, 64))
+            except Exception:
                 no_accounts_icon.setText("🏦")
                 no_accounts_icon.setStyleSheet("font-size: 48px;")
             no_accounts_icon.setAlignment(Qt.AlignCenter)
@@ -2770,7 +2982,7 @@ class DashboardMain(QMainWindow):
             no_accounts = QLabel("No accounts linked yet")
             no_accounts.setAlignment(Qt.AlignCenter)
             no_accounts.setStyleSheet(f"""
-                color: {PennyColors.TEXT_PRIMARY};
+                color: {theme_color('text_primary')};
                 font-size: 16px;
                 font-weight: 600;
                 padding: 12px 0 4px 0;
@@ -2780,7 +2992,7 @@ class DashboardMain(QMainWindow):
             no_accounts_sub = QLabel("Link your first bank account to get started")
             no_accounts_sub.setAlignment(Qt.AlignCenter)
             no_accounts_sub.setStyleSheet(f"""
-                color: {PennyColors.TEXT_SECONDARY};
+                color: {theme_color('text_secondary')};
                 font-size: 14px;
                 padding: 0 0 24px 0;
             """)
@@ -2804,6 +3016,59 @@ class DashboardMain(QMainWindow):
         main_layout.addWidget(scroll)
         
         return page
+
+    def _apply_root_backgrounds(self):
+        """Apply current theme background to root containers and pages."""
+        try:
+            bg = QColor(theme_color('background'))
+            # Main window background/text
+            self.setAutoFillBackground(True)
+            pal_self = self.palette()
+            pal_self.setColor(QPalette.Window, bg)
+            pal_self.setColor(QPalette.WindowText, QColor(theme_color('text_primary')))
+            self.setPalette(pal_self)
+            self.setStyleSheet(f"background: {theme_color('background')}; color: {theme_color('text_primary')};")
+            if hasattr(self, "central_widget") and self.central_widget:
+                self.central_widget.setAutoFillBackground(True)
+                pal = self.central_widget.palette()
+                pal.setColor(QPalette.Window, bg)
+                self.central_widget.setPalette(pal)
+            if hasattr(self, "dashboard_content_container") and self.dashboard_content_container:
+                self.dashboard_content_container.setStyleSheet(f"background: {theme_color('background')};")
+            if hasattr(self, "dashboard_scroll") and self.dashboard_scroll:
+                try:
+                    vp = self.dashboard_scroll.viewport()
+                    if vp:
+                        vp_pal = vp.palette()
+                        vp_pal.setColor(QPalette.Window, QColor(theme_color('background')))
+                        vp.setPalette(vp_pal)
+                        vp.setAutoFillBackground(True)
+                except Exception:
+                    pass
+            if hasattr(self, "welcome_label"):
+                self.welcome_label.setStyleSheet(f"color: {theme_color('text_primary')};")
+            if hasattr(self, "commitment_title"):
+                self.commitment_title.setStyleSheet(f"color: {theme_color('text_primary')}; margin-top: 15px;")
+            if hasattr(self, "transactions_title"):
+                self.transactions_title.setStyleSheet(f"color: {theme_color('text_primary')}; margin-top: 15px;")
+            if hasattr(self, "accounts_page_widget") and self.accounts_page_widget:
+                self.accounts_page_widget.setStyleSheet(f"background: {theme_color('background')};")
+            if hasattr(self, "accounts_scroll") and self.accounts_scroll:
+                try:
+                    vp = self.accounts_scroll.viewport()
+                    if vp:
+                        vp_pal = vp.palette()
+                        vp_pal.setColor(QPalette.Window, QColor(theme_color('background')))
+                        vp.setPalette(vp_pal)
+                        vp.setAutoFillBackground(True)
+                except Exception:
+                    pass
+            if hasattr(self, "accounts_scroll_content") and self.accounts_scroll_content:
+                self.accounts_scroll_content.setStyleSheet(f"background: {theme_color('background')};")
+            if hasattr(self, "stack") and self.stack:
+                self.stack.setStyleSheet(f"background: {theme_color('background')};")
+        except Exception as e:
+            logger.warning(f"[theme] apply root backgrounds failed: {e}")
 
     def create_account_card(self, acc, active_checking_id, active_savings_id, parent_layout):
         """Create account card with logo, name, and status"""
@@ -2842,13 +3107,8 @@ class DashboardMain(QMainWindow):
         if not display_name:
             display_name = "Bank"
         
-        # Get institution logo URL
-        institution_logo_url = None
-        if 'institution_logo' in acc.keys() and acc['institution_logo']:
-            institution_logo_url = acc['institution_logo']
-        
-        # Also try to fetch institution info if we have institution_id but no name/logo
-        if (not display_name or display_name == "Bank" or not institution_logo_url) and 'institution_id' in acc.keys() and acc['institution_id']:
+        # Also try to fetch institution info if we have institution_id (for display name only)
+        if (not display_name or display_name == "Bank") and 'institution_id' in acc.keys() and acc['institution_id']:
             try:
                 from core.plaid_api import get_institution_by_id
                 institution_data = get_institution_by_id(acc['institution_id'])
@@ -2856,8 +3116,6 @@ class DashboardMain(QMainWindow):
                     institution = institution_data["institution"]
                     if not display_name or display_name == "Bank":
                         display_name = institution.get("name", display_name)
-                    if not institution_logo_url:
-                        institution_logo_url = institution.get("logo", None) or institution.get("icon", None)
             except Exception as e:
                 logger.warning(f"Failed to fetch institution details: {e}")
         
@@ -2868,6 +3126,7 @@ class DashboardMain(QMainWindow):
         
         # Account card
         account_card = QFrame()
+        p = theme_palette()
         
         # Highlight active accounts with different colors
         if is_active_checking:
@@ -2877,8 +3136,8 @@ class DashboardMain(QMainWindow):
             border_color = PennyColors.SUCCESS  # Green for savings
             bg_color = f"rgba(34, 197, 94, 0.05)"
         else:
-            border_color = "#E5E7EB"
-            bg_color = PennyColors.SURFACE
+            border_color = p['border']
+            bg_color = p['surface']
         
         account_card.setStyleSheet(f"""
             QFrame {{
@@ -2886,11 +3145,10 @@ class DashboardMain(QMainWindow):
                 border: 2px solid {border_color};
                 border-radius: 12px;
                 padding: 16px;
-                cursor: pointer;
             }}
             QFrame:hover {{
-                border-color: {border_color if is_active else '#d6733a'};
-                background: {bg_color if is_active else 'rgba(214, 115, 58, 0.05)'};
+                border-color: {border_color if is_active else theme_color('accent')};
+                background: {bg_color if is_active else p.get('surface_alt', bg_color)};
             }}
         """)
         
@@ -2916,42 +3174,17 @@ class DashboardMain(QMainWindow):
         # Bank logo (icon) - left side
         logo_label = QLabel()
         logo_label.setFixedSize(40, 40)
-        logo_bg_color = 'rgba(214, 115, 58, 0.1)' if is_active else 'rgba(107, 114, 128, 0.1)'
-        logo_text_color = PennyColors.ACCENT if is_active else PennyColors.TEXT_SECONDARY
+        logo_bg_color = theme_color('surface_alt') if is_active else theme_color('surface')
+        logo_text_color = theme_color('accent') if is_active else theme_color('text_secondary')
         
-        # Try to load logo from URL if available
-        logo_loaded = False
-        if institution_logo_url:
-            try:
-                import requests
-                from PyQt5.QtGui import QPixmap
-                
-                # Use requests to download the image
-                response = requests.get(institution_logo_url, timeout=5)
-                if response.status_code == 200:
-                    pixmap = QPixmap()
-                    pixmap.loadFromData(response.content)
-                    if not pixmap.isNull():
-                        scaled_pixmap = pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                        logo_label.setPixmap(scaled_pixmap)
-                        logo_label.setStyleSheet(f"background: {logo_bg_color}; border-radius: 8px; padding: 4px;")
-                        logo_loaded = True
-                        logger.info(f"Successfully loaded logo from {institution_logo_url}")
-            except Exception as e:
-                logger.warning(f"Failed to load logo from URL {institution_logo_url}: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        # Fallback to icon if logo not loaded
-        if not logo_loaded:
-            try:
-                # Try to use a bank icon
-                logo_icon = qta.icon('fa5s.university', color=logo_text_color)
-                logo_label.setPixmap(logo_icon.pixmap(40, 40))
-                logo_label.setStyleSheet(f"background: {logo_bg_color}; border-radius: 8px;")
-            except:
-                logo_label.setText("🏦")
-                logo_label.setStyleSheet(f"font-size: 32px; color: {logo_text_color}; background: {logo_bg_color}; border-radius: 8px;")
+        # Simplified logo: always use local icon (avoid network/base64 fetch)
+        try:
+            logo_icon = qta.icon('fa5s.university', color=logo_text_color)
+            logo_label.setPixmap(logo_icon.pixmap(40, 40))
+            logo_label.setStyleSheet(f"background: {logo_bg_color}; border-radius: 8px;")
+        except Exception:
+            logo_label.setText("🏦")
+            logo_label.setStyleSheet(f"font-size: 32px; color: {logo_text_color}; background: {logo_bg_color}; border-radius: 8px;")
         
         logo_label.setAlignment(Qt.AlignCenter)
         account_layout.addWidget(logo_label)
@@ -2966,7 +3199,7 @@ class DashboardMain(QMainWindow):
         account_name_label = QLabel(display_name)
         account_name_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
         account_name_label.setStyleSheet(f"""
-            color: {PennyColors.TEXT_PRIMARY};
+            color: {theme_color('text_primary')};
             background: transparent;
             border: none;
             padding: 0;
@@ -2977,7 +3210,7 @@ class DashboardMain(QMainWindow):
         account_number_label = QLabel(account_id if account_id else "")
         account_number_label.setFont(QFont("Segoe UI", 11))
         account_number_label.setStyleSheet(f"""
-            color: {PennyColors.TEXT_SECONDARY};
+            color: {theme_color('text_secondary')};
             background: transparent;
             border: none;
             padding: 0;
@@ -3014,8 +3247,8 @@ class DashboardMain(QMainWindow):
         else:
             status_badge = QLabel("Not Active")
             status_badge.setStyleSheet(f"""
-                background: #E5E7EB;
-                color: #6B7280;
+                background: {theme_color('surface_alt')};
+                color: {theme_color('text_secondary')};
                 padding: 6px 12px;
                 border-radius: 8px;
                 font-size: 12px;
@@ -3027,7 +3260,7 @@ class DashboardMain(QMainWindow):
         menu_btn = QPushButton()
         menu_btn.setFixedSize(32, 32)
         try:
-            menu_icon = qta.icon('fa5s.ellipsis-v', color=PennyColors.TEXT_SECONDARY)
+            menu_icon = qta.icon('fa5s.ellipsis-v', color=theme_color('text_secondary'))
             menu_btn.setIcon(menu_icon)
         except:
             menu_btn.setText("⋯")
@@ -3038,7 +3271,7 @@ class DashboardMain(QMainWindow):
                 border-radius: 6px;
             }}
             QPushButton:hover {{
-                background: rgba(107, 114, 128, 0.1);
+                background: {theme_color('row_hover', theme_color('surface_alt'))};
             }}
         """)
         
@@ -3228,8 +3461,8 @@ class DashboardMain(QMainWindow):
         inst_card = QFrame()
         inst_card.setStyleSheet(f"""
             QFrame {{
-                background: {PennyColors.SURFACE};
-                border: 1px solid #E5E7EB;
+                background: {theme_color('surface')};
+                border: 1px solid {theme_color('border')};
                 border-radius: 12px;
                 padding: 0px;
             }}
@@ -3251,7 +3484,7 @@ class DashboardMain(QMainWindow):
         header = QFrame()
         header.setStyleSheet(f"""
             QFrame {{
-                background: {PennyColors.SURFACE};
+                background: {theme_color('surface')};
                 border-radius: 12px;
                 padding: 12px 16px;
             }}
@@ -3265,17 +3498,17 @@ class DashboardMain(QMainWindow):
         chevron_label = QLabel()
         chevron_label.setFixedSize(28, 28)
         try:
-            chevron_icon = qta.icon('fa5s.chevron-down', color=PennyColors.ACCENT)
+            chevron_icon = qta.icon('fa5s.chevron-down', color=theme_color('accent'))
             chevron_label.setPixmap(chevron_icon.pixmap(28, 28))
         except:
             chevron_label.setText("▼")
-            chevron_label.setStyleSheet(f"color: {PennyColors.ACCENT}; font-size: 16px;")
+            chevron_label.setStyleSheet(f"color: {theme_color('accent')}; font-size: 16px;")
         chevron_label.setAlignment(Qt.AlignCenter)
         
         # Bank name (16px bold)
         bank_name_label = QLabel(inst_name)
         bank_name_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
-        bank_name_label.setStyleSheet(f"color: {PennyColors.TEXT_PRIMARY};")
+        bank_name_label.setStyleSheet(f"color: {theme_color('text_primary')};")
         
         header_layout.addWidget(chevron_label)
         header_layout.addWidget(bank_name_label)
@@ -3285,10 +3518,10 @@ class DashboardMain(QMainWindow):
         account_count = len(accounts)
         count_label = QLabel(f"{account_count} account{'s' if account_count != 1 else ''}")
         count_label.setStyleSheet(f"""
-            color: {PennyColors.TEXT_SECONDARY};
+            color: {theme_color('text_secondary')};
             font-size: 12px;
             padding: 4px 8px;
-            background: rgba(107, 114, 128, 0.1);
+            background: {theme_color('row_hover', 'rgba(107, 114, 128, 0.1)')};
             border-radius: 6px;
         """)
         header_layout.addWidget(count_label)
@@ -3310,10 +3543,11 @@ class DashboardMain(QMainWindow):
             
             # Account card
             account_card = QFrame()
+            p = theme_palette()
             account_card.setStyleSheet(f"""
                 QFrame {{
-                    background: {PennyColors.BACKGROUND};
-                    border: 1px solid #E5E7EB;
+                    background: {p['surface']};
+                    border: 1px solid {p['border']};
                     border-radius: 10px;
                     padding: 12px;
                 }}
@@ -3329,7 +3563,7 @@ class DashboardMain(QMainWindow):
             # Account name (13px bold)
             account_name_label = QLabel(bank_name)
             account_name_label.setFont(QFont("Segoe UI", 13, QFont.Bold))
-            account_name_label.setStyleSheet(f"color: {PennyColors.TEXT_PRIMARY};")
+            account_name_label.setStyleSheet(f"color: {theme_color('text_primary')};")
             account_header.addWidget(account_name_label)
             account_header.addStretch()
             
@@ -3338,7 +3572,7 @@ class DashboardMain(QMainWindow):
                 primary_badge = QLabel("Primary")
                 primary_badge.setStyleSheet(f"""
                     background: {PennyColors.ACCENT};
-                    color: white;
+                    color: {PennyColors.SURFACE};
                     padding: 4px 8px;
                     border-radius: 6px;
                     font-size: 11px;
@@ -3355,7 +3589,7 @@ class DashboardMain(QMainWindow):
             
             type_label = QLabel(account_type.title())
             type_label.setStyleSheet(f"""
-                color: {PennyColors.TEXT_SECONDARY};
+                color: {theme_color('text_secondary')};
                 font-size: 12px;
             """)
             type_layout.addWidget(type_label)
@@ -3536,6 +3770,10 @@ class DashboardMain(QMainWindow):
         """Show dashboard view"""
         self.stack.setCurrentWidget(self.page_dashboard)
         self.highlight_nav("Dashboard")
+        try:
+            logger.info("[dashboard] show_dashboard done - page set to dashboard")
+        except Exception:
+            pass
 
     def show_transactions(self):
         """Show transactions view"""
@@ -3610,6 +3848,12 @@ class DashboardMain(QMainWindow):
             if plaid_accounts:
                 has_plaid_checking = True
                 for account in plaid_accounts:
+                    # Priority 1: Use simulated_balance if set (for developer testing)
+                    sim_bal = fetch_one("SELECT simulated_balance FROM accounts WHERE account_id = ?", (account["account_id"],))
+                    if sim_bal and sim_bal["simulated_balance"] is not None:
+                        checking_balance += sim_bal["simulated_balance"]
+                        continue
+                    # Priority 2: Use Plaid API
                     try:
                         balances_data = get_account_balances(account["plaid_token"])
                         # Check if response contains an error
@@ -3692,9 +3936,13 @@ class DashboardMain(QMainWindow):
             except (KeyError, TypeError, AttributeError):
                 commitments = 0
 
-            # Calculate available balance
-            # Available balance = checking balance - unpaid commitments
-            available = checking_balance - commitments
+            # Calculate balances
+            price_after_commitments = checking_balance - commitments  # what's left after paying all unpaid commitments
+            logger.info(
+                f"[overview_cards] user={self.user_id} checking_balance={checking_balance} "
+                f"savings_balance={savings} unpaid_commitments={commitments} "
+                f"price_after_commitments={price_after_commitments}"
+            )
 
             # Get currency
             user_currency = fetch_one("SELECT currency FROM settings WHERE user_id = ?",(self.user_id,))
@@ -3726,7 +3974,7 @@ class DashboardMain(QMainWindow):
                 savings_card = self.create_finance_card(
                     "Savings Balance",
                     f"{currency} {savings:,.2f}",
-                    "#10B981",
+                    theme_color('success'),
                     "positive"
                 )
             else:
@@ -3754,8 +4002,8 @@ class DashboardMain(QMainWindow):
             # Price After Commitments always shows as finance card (even with 0.00)
             commitments_card = self.create_finance_card(
                 "Balance After Commitments",
-                f"{currency} {available:,.2f}",
-                "#F59E0B",
+                f"{currency} {price_after_commitments:,.2f}",
+                theme_color('warning'),
                 "warning"
             )
             
@@ -3763,8 +4011,8 @@ class DashboardMain(QMainWindow):
             if has_main and checking_balance > 0:
                 available_card = self.create_finance_card(
                     " Available Balance",
-                    f"{currency} {available:,.2f}",
-                    "#10B981",
+                    f"{currency} {checking_balance:,.2f}",
+                    theme_color('success'),
                     "positive"
                 )
             else:
@@ -3822,7 +4070,7 @@ class DashboardMain(QMainWindow):
             # Price After Commitments always shows as finance card (even with 0.00)
             commitments_card = self.create_finance_card(
                 "Balance After Commitments",
-                f"{currency} 0.00",
+                f"{currency} {price_after_commitments:,.2f}",
                 "#F59E0B",
                 "warning"
             )
@@ -3846,15 +4094,16 @@ class DashboardMain(QMainWindow):
     def create_finance_card(self,title,value,color,card_type):
         """Create a clean finance card with visible text"""
         card = QFrame()
+        p = theme_palette()
         card.setStyleSheet(f"""
             QFrame {{
-                background: white;
-                border: 1px solid #E5E7EB;
+                background: {p['surface']};
+                border: 1px solid {p['border']};
                 border-radius: 16px;
             }}
             QFrame:hover {{
                 border: 1px solid {color};
-                background: #F9FAFB;
+                background: {p.get('surface_alt', p['surface'])};
             }}
         """)
         card.setFixedHeight(160)
@@ -3869,7 +4118,7 @@ class DashboardMain(QMainWindow):
         title_label = QLabel(title)
         title_label.setStyleSheet(f"""
             QLabel {{
-                color: #374151;
+                color: {theme_color('text_primary')};
                 font-size: 16px;
                 font-weight: 600;
                 background: transparent;
@@ -3925,14 +4174,14 @@ class DashboardMain(QMainWindow):
 
         # Title label
         title_label = QLabel(title)
-        title_label.setStyleSheet("""
-            QLabel {
-                color: #6B7280;
+        title_label.setStyleSheet(f"""
+            QLabel {{
+                color: {theme_color('text_secondary')};
                 font-size: 16px;
                 font-weight: 600;
                 background: transparent;
                 border: none;
-            }
+            }}
         """)
         title_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(title_label)
@@ -3972,15 +4221,20 @@ class DashboardMain(QMainWindow):
         # Update card style to show it's clickable
         card.setStyleSheet("""
             QFrame {
-                background: white;
-                border: 2px dashed #D1D5DB;
+                background: %s;
+                border: 2px dashed %s;
                 border-radius: 16px;
             }
             QFrame:hover {
-                border-color: #d6733a;
-                background: #fffaf5;
+                border-color: %s;
+                background: %s;
             }
-        """)
+        """ % (
+            theme_color('surface'),
+            theme_color('border'),
+            theme_color('accent'),
+            theme_color('surface_alt')
+        ))
 
         # Subtle shadow
         shadow = QGraphicsDropShadowEffect()
@@ -4041,6 +4295,10 @@ class DashboardMain(QMainWindow):
         # Create all pages
         self.create_pages()
 
+        # Ensure central/background inherits theme palette (prevents stale light bg)
+        self.central_widget = central_widget
+        self._apply_root_backgrounds()
+
         main_layout.addWidget(content_wrapper)
 
 
@@ -4051,9 +4309,12 @@ class DashboardMain(QMainWindow):
     def setup_header(self,layout):
         """Clean header with minimal spacing"""
         welcome = QLabel(f"Welcome back, {self.username}!")
+        self.welcome_label = welcome
         welcome.setFont(QFont("Segoe UI",22,QFont.Bold))
-        welcome.setStyleSheet("""
-            color: #111827; 
+        welcome.setStyleSheet(f"""
+            color: {theme_color('text_primary')}; 
+            font-family: 'Segoe UI', sans-serif;
+            font-weight: 700;
             margin: 0px; 
             padding: 0px;
             
@@ -4090,7 +4351,7 @@ class DashboardMain(QMainWindow):
         # --- Financial Companion Section ONLY ---
         companion_title = QLabel("Pennys corner")
         companion_title.setFont(QFont("Segoe UI",18,QFont.Bold))
-        companion_title.setStyleSheet("color: #1F2937; margin-top: 15px;")
+        companion_title.setStyleSheet(f"color: {theme_color('text_primary')}; margin-top: 15px;")
 
 
 
@@ -4106,8 +4367,9 @@ class DashboardMain(QMainWindow):
 
         # --- Recent Transactions Section ---
         transactions_title = QLabel(" Recent Transactions")
+        self.transactions_title = transactions_title
         transactions_title.setFont(QFont("Segoe UI",18,QFont.Bold))
-        transactions_title.setStyleSheet("color: #1F2937; margin-top: 15px;")
+        transactions_title.setStyleSheet(f"color: {theme_color('text_primary')}; margin-top: 15px;")
         layout.addWidget(transactions_title)
 
         # Add transactions section
@@ -4133,11 +4395,22 @@ class DashboardMain(QMainWindow):
 
         # Clean container (matching dashboard background)
         activity_frame = QFrame()
-        activity_frame.setStyleSheet("""
-            QFrame { 
-                background: #f9f7f5; 
-                padding: 0px; 
-            }
+        activity_frame.setObjectName("recentActivity")
+        activity_frame.setAutoFillBackground(True)
+        activity_bg = QColor(theme_color('background'))
+        pal = activity_frame.palette()
+        pal.setColor(QPalette.Window, activity_bg)
+        activity_frame.setPalette(pal)
+        activity_frame.setStyleSheet(f"""
+            QFrame#recentActivity {{
+                background-color: {theme_color('background')};
+                padding: 0px;
+                border: none;
+            }}
+            QFrame#recentActivity * {{
+                background-color: {theme_color('background')};
+                color: {theme_color('text_primary')};
+            }}
         """)
         # Store reference to frame for refreshing
         self.recent_transactions_frame = activity_frame
@@ -4147,8 +4420,8 @@ class DashboardMain(QMainWindow):
 
         if not transactions:
             no_data = QLabel("No recent transactions found")
-            no_data.setStyleSheet("""
-                color: #6B7280; 
+            no_data.setStyleSheet(f"""
+                color: {theme_color('text_secondary')}; 
                 font-family: 'Poppins', sans-serif;
                 font-size: 14px; 
                 font-style: italic; 
@@ -4217,62 +4490,68 @@ class DashboardMain(QMainWindow):
 
     def create_date_header(self, date, transactions):
         """Create a date header with daily subtotal matching the image style"""
+        p = PennyColors.get_palette(theme_manager.current_theme)
         # Calculate daily subtotal
         daily_total = sum(
             txn['amount'] if txn['transaction_type'] == 'income' else -txn['amount']
             for txn in transactions
         )
-        
+
         header_widget = QFrame()
-        header_widget.setStyleSheet("""
-            QFrame {
-                background: #f5f2ed;
+        header_widget.setAutoFillBackground(True)
+        header_widget.setStyleSheet(f"""
+            QFrame {{
+                background-color: {theme_color('surface')};
                 padding: 8px 16px;
                 border-radius: 8px;
                 margin: 4px 0;
-            }
+            }}
         """)
-        
+
         header_layout = QHBoxLayout(header_widget)
         header_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # Date label (slightly darker than background)
         date_label = QLabel(date)
-        date_label.setStyleSheet("""
+        date_label.setStyleSheet(f"""
             font-family: 'Poppins', sans-serif;
             font-size: 15px;
             font-weight: 500;
-            color: #6B7280;
+            color: {theme_color('text_primary')};
         """)
-        
+
         # Daily subtotal (slightly darker than background)
         total_label = QLabel(f"{'+' if daily_total >= 0 else ''}{daily_total:,.2f}")
         total_label.setStyleSheet(f"""
             font-family: 'Poppins', sans-serif;
             font-size: 15px;
             font-weight: 500;
-            color: #6B7280;
+            color: {theme_color('text_secondary')};
         """)
-        
+
         header_layout.addWidget(date_label)
         header_layout.addStretch()
         header_layout.addWidget(total_label)
-        
+
         # No separator line - just return the header widget
         return header_widget
 
     def create_modern_transaction_widget(self, txn):
         """Create a modern transaction widget matching the exact image style"""
+        p = PennyColors.get_palette(theme_manager.current_theme)
         widget = QFrame()
-        widget.setStyleSheet("""
-            QFrame { 
-                background: #f9f7f5;
+        widget.setObjectName("txnRow")
+        widget.setAutoFillBackground(True)
+        widget.setStyleSheet(f"""
+            QFrame#txnRow {{
+                background-color: transparent;
                 padding: 8px 16px;
                 margin: 0;
-            } 
-            QFrame:hover { 
-                background: #f0ede8;
-            }
+                border: none;
+            }}
+            QFrame#txnRow:hover {{
+                background-color: {theme_color('surface_alt')};
+            }}
         """)
         
         layout = QHBoxLayout(widget)
@@ -4286,21 +4565,21 @@ class DashboardMain(QMainWindow):
         
         # Merchant name (grey, not bold) - no bullet point
         merchant_name = QLabel(txn["description"] or "No description")
-        merchant_name.setStyleSheet("""
+        merchant_name.setStyleSheet(f"""
             font-family: 'Poppins', sans-serif;
             font-weight: 400; 
             font-size: 15px; 
-            color: #6B7280;
+            color: {theme_color('text_secondary')};
         """)
         left_layout.addWidget(merchant_name)
         
         # Transaction time
         time_label = QLabel(self.format_transaction_time(txn['date']))
-        time_label.setStyleSheet("""
+        time_label.setStyleSheet(f"""
             font-family: 'Poppins', sans-serif;
             font-weight: 400; 
             font-size: 12px; 
-            color: #9CA3AF;
+            color: {theme_color('muted')};
         """)
         left_layout.addWidget(time_label)
         
@@ -4322,15 +4601,15 @@ class DashboardMain(QMainWindow):
             font-family: 'Poppins', sans-serif;
             font-weight: 600; 
             font-size: 15px; 
-            color: {'#10B981' if txn['transaction_type'] == 'income' else '#EF4444'};
+            color: {theme_color('success') if txn['transaction_type'] == 'income' else theme_color('error')};
         """)
         right_layout.addWidget(amount)
         
         # Small arrow icon (grey)
         arrow_icon = QLabel(">")
-        arrow_icon.setStyleSheet("""
+        arrow_icon.setStyleSheet(f"""
             font-family: 'Poppins', sans-serif;
-            color: #9CA3AF;
+            color: {theme_color('muted')};
             font-size: 12px;
             font-weight: bold;
         """)
@@ -4384,14 +4663,16 @@ class DashboardMain(QMainWindow):
     def create_clean_transaction_widget(self, txn):
         """Create a clean transaction widget matching the second image style"""
         widget = QFrame()
-        widget.setStyleSheet("""
-            QFrame { 
-                background: transparent;
+        p = theme_palette()
+        widget.setStyleSheet(f"""
+            QFrame {{ 
+                background: {p.get('row_bg', p['background'])};
                 padding: 12px 0;
-            } 
-            QFrame:hover { 
-                background-color: #F8F9FA;
-            }
+                border-radius: 8px;
+            }} 
+            QFrame:hover {{ 
+                background-color: {p.get('row_hover', p['surface_alt'])};
+            }}
         """)
         layout = QHBoxLayout(widget)
         layout.setSpacing(16)
@@ -4400,20 +4681,20 @@ class DashboardMain(QMainWindow):
         # Small selection/status icon (like in the second image)
         status_icon = QLabel()
         status_icon.setFixedSize(16, 16)
-        status_icon.setStyleSheet("""
-            QLabel {
-                background: #E5E7EB;
+        status_icon.setStyleSheet(f"""
+            QLabel {{
+                background: {p.get('border', theme_color('border'))};
                 border-radius: 8px;
-            }
+            }}
         """)
         layout.addWidget(status_icon)
 
         # Transaction description (main text)
         desc = QLabel(txn["description"] or "No description")
-        desc.setStyleSheet("""
+        desc.setStyleSheet(f"""
             font-weight: 500; 
             font-size: 15px; 
-            color: #111827;
+            color: {theme_color('text_primary')};
         """)
         layout.addWidget(desc)
 
@@ -4426,7 +4707,7 @@ class DashboardMain(QMainWindow):
         category_icon.setFixedSize(20, 20)
         category_icon.setStyleSheet(f"""
             QLabel {{
-                background: {'#EF4444' if txn['transaction_type'] == 'expense' else '#10B981'};
+                background: {'#ff5c5c' if txn['transaction_type'] == 'expense' else theme_color('success')};
                 border-radius: 10px;
             }}
         """)
@@ -4434,9 +4715,9 @@ class DashboardMain(QMainWindow):
         
         # Category name
         category_name = QLabel(txn['category_name'] or 'Uncategorized')
-        category_name.setStyleSheet("""
+        category_name.setStyleSheet(f"""
             font-size: 14px; 
-            color: #374151;
+            color: {theme_color('text_secondary')};
         """)
         category_layout.addWidget(category_name)
         
@@ -4452,14 +4733,14 @@ class DashboardMain(QMainWindow):
         amount.setStyleSheet(f"""
             font-weight: 600; 
             font-size: 15px; 
-            color: {'#111827' if txn['transaction_type'] == 'expense' else '#10B981'};
+            color: {theme_color('text_primary') if txn['transaction_type'] == 'expense' else theme_color('success')};
         """)
         right_layout.addWidget(amount)
         
         # Small arrow icon (like in the second image)
         arrow_icon = QLabel("→")
-        arrow_icon.setStyleSheet("""
-            color: #9CA3AF;
+        arrow_icon.setStyleSheet(f"""
+            color: {theme_color('muted')};
             font-size: 12px;
         """)
         right_layout.addWidget(arrow_icon)
@@ -4478,13 +4759,13 @@ class DashboardMain(QMainWindow):
         header = QHBoxLayout()
         title = QLabel("Financial Companion")
         title.setFont(QFont("Segoe UI",18,QFont.Bold))
-        title.setStyleSheet("color: #111827;")
+        title.setStyleSheet(f"color: {theme_color('text_primary')};")
 
         status = QLabel("AI Assistant Active")
-        status.setStyleSheet("""
-            color: #10B981;
+        status.setStyleSheet(f"""
+            color: {theme_color('success')};
             font-weight: bold;
-            background: rgba(16,185,129,0.1);
+            background: {theme_color('row_hover', 'rgba(16,185,129,0.1)')};
             padding: 6px 12px;
             border-radius: 8px;
             font-size: 13px;
@@ -4514,17 +4795,17 @@ class DashboardMain(QMainWindow):
         header = QHBoxLayout()
         title = QLabel("Financial Achievements")
         title.setFont(QFont("Segoe UI",18,QFont.Bold))
-        title.setStyleSheet("color: #111827;")
+        title.setStyleSheet(f"color: {theme_color('text_primary')};")
 
         placeholder_label = QLabel("Badges feature coming soon...")
-        placeholder_label.setStyleSheet("""
-            color: #6B7280;
+        placeholder_label.setStyleSheet(f"""
+            color: {theme_color('text_secondary')};
             font-size: 14px;
             font-style: italic;
             padding: 40px;
-            background: #F9FAFB;
+            background: {theme_color('surface_alt')};
             border-radius: 12px;
-            border: 2px dashed #E5E7EB;
+            border: 2px dashed {theme_color('border')};
         """)
         placeholder_label.setAlignment(Qt.AlignCenter)
 
@@ -4542,7 +4823,7 @@ class DashboardMain(QMainWindow):
 
         title = QLabel("Financial Wellness")
         title.setFont(QFont("Segoe UI",18,QFont.Bold))
-        title.setStyleSheet("color: #111827;")
+        title.setStyleSheet(f"color: {theme_color('text_primary')};")
 
         self.mood_meter = MoodMeter(self.user_id)
 
@@ -4562,13 +4843,13 @@ class DashboardMain(QMainWindow):
         header = QHBoxLayout()
         title = QLabel("Financial Companion")
         title.setFont(QFont("Segoe UI",18,QFont.Bold))
-        title.setStyleSheet("color: #111827;")
+        title.setStyleSheet(f"color: {theme_color('text_primary')};")
 
         status = QLabel("AI Assistant Active")
-        status.setStyleSheet("""
-            color: #10B981;
+        status.setStyleSheet(f"""
+            color: {theme_color('success')};
             font-weight: bold;
-            background: rgba(16,185,129,0.1);
+            background: {theme_color('row_hover', 'rgba(16,185,129,0.1)')};
             padding: 6px 12px;
             border-radius: 8px;
             font-size: 13px;
@@ -4595,23 +4876,23 @@ class DashboardMain(QMainWindow):
 
         # Spending Overview
         spending_card = CardWidget("Spending Overview","Monthly budget tracking")
-        spending_card.setStyleSheet("""
-            CardWidget {
-                background: white;
-                border: 1px solid #E5E7EB;
+        spending_card.setStyleSheet(f"""
+            CardWidget {{
+                background: {theme_color('surface')};
+                border: 1px solid {theme_color('border')};
                 border-radius: 16px;
-            }
+            }}
         """)
         spending_card.add_layout(self.create_spending_content())
 
         # Financial Goals
         goals_card = CardWidget("Financial Goals","Progress tracking")
-        goals_card.setStyleSheet("""
-            CardWidget {
-                background: white;
-                border: 1px solid #E5E7EB;
+        goals_card.setStyleSheet(f"""
+            CardWidget {{
+                background: {theme_color('surface')};
+                border: 1px solid {theme_color('border')};
                 border-radius: 16px;
-            }
+            }}
         """)
         goals_card.add_layout(self.create_goals_content())
 
@@ -4636,14 +4917,14 @@ class DashboardMain(QMainWindow):
         for name,spent,budget,variant in categories:
             row = QHBoxLayout()
             label = QLabel(name)
-            label.setStyleSheet("font-size: 13px; color: #374151; font-weight: 500;")
+            label.setStyleSheet(f"font-size: 13px; color: {theme_color('text_primary')}; font-weight: 500;")
             label.setFixedWidth(120)
 
             prog = ProgressBar(spent,budget,"",True,variant)
             prog.setFixedHeight(16)
 
             amt = QLabel(f"${spent} / ${budget}")
-            amt.setStyleSheet("font-size: 12px; color: #6B7280; font-weight: 600;")
+            amt.setStyleSheet(f"font-size: 12px; color: {theme_color('text_secondary')}; font-weight: 600;")
             amt.setFixedWidth(80)
 
             row.addWidget(label)
@@ -4667,9 +4948,10 @@ class DashboardMain(QMainWindow):
 
         for name,prog,target in goals:
             goal_frame = QFrame()
-            goal_frame.setStyleSheet("""
+            goal_frame.setStyleSheet(f"""
                 QFrame {
-                    background: #F9FAFB;
+                    background: {theme_color('surface_alt')};
+                    border: 1px solid {theme_color('border')};
                     border-radius: 12px;
                     padding: 12px;
                 }
@@ -4681,9 +4963,9 @@ class DashboardMain(QMainWindow):
             # Header
             header = QHBoxLayout()
             goal_label = QLabel(name)
-            goal_label.setStyleSheet("font-weight: 600; color: #374151; font-size: 13px;")
+            goal_label.setStyleSheet(f"font-weight: 600; color: {theme_color('text_primary')}; font-size: 13px;")
             perc_label = QLabel(f"{prog}%")
-            perc_label.setStyleSheet("color: #2563EB; font-weight: 700; font-size: 13px;")
+            perc_label.setStyleSheet(f"color: {theme_color('accent')}; font-weight: 700; font-size: 13px;")
 
             header.addWidget(goal_label)
             header.addStretch()
@@ -4695,7 +4977,7 @@ class DashboardMain(QMainWindow):
 
             # Target
             target_label = QLabel(target)
-            target_label.setStyleSheet("color: #6B7280; font-size: 11px;")
+            target_label.setStyleSheet(f"color: {theme_color('text_secondary')}; font-size: 11px;")
 
             goal_layout.addLayout(header)
             goal_layout.addWidget(bar)
@@ -4749,11 +5031,14 @@ class DashboardMain(QMainWindow):
     def on_settings_changed(self, settings_data):
         """Handle settings changes from settings window"""
         try:
+            theme_changed = False
             # Apply dark mode changes
             if settings_data.get('dark_mode', False):
                 self.apply_dark_theme()
+                theme_changed = True
             else:
                 self.apply_light_theme()
+                theme_changed = True
                 
             # Apply custom accent color
             if 'custom_accent_color' in settings_data:
@@ -4767,109 +5052,50 @@ class DashboardMain(QMainWindow):
             if 'username' in settings_data:
                 self.username = settings_data['username']
                 self.setWindowTitle(f"PennyWise - {self.username}'s Dashboard")
+            
+            # Rebuild dashboard visuals so widgets pick up the new palette immediately
+            if theme_changed:
+                self.refresh_dashboard()
                 
         except Exception as e:
             print(f"Error applying settings changes: {e}")
             
     def apply_dark_theme(self):
         """Apply dark theme to the entire application"""
-        dark_stylesheet = """
-            QMainWindow {
-                background: #1F2937;
-                color: #F9FAFB;
-            }
-            QWidget {
-                background: #1F2937;
-                color: #F9FAFB;
-            }
-            QFrame {
-                background: #374151;
-                border: 1px solid #4B5563;
-                border-radius: 8px;
-            }
-            QPushButton {
-                background: #4B5563;
-                color: #F9FAFB;
-                border: 1px solid #6B7280;
-                border-radius: 6px;
-                padding: 8px 16px;
-            }
-            QPushButton:hover {
-                background: #6B7280;
-            }
-            QPushButton:checked {
-                background: #d6733a;
-                border-color: #d6733a;
-            }
-            QLineEdit {
-                background: #374151;
-                color: #F9FAFB;
-                border: 1px solid #4B5563;
-                border-radius: 6px;
-                padding: 8px 12px;
-            }
-            QComboBox {
-                background: #374151;
-                color: #F9FAFB;
-                border: 1px solid #4B5563;
-                border-radius: 6px;
-                padding: 8px 12px;
-            }
-            QLabel {
-                color: #F9FAFB;
-            }
-        """
-        QApplication.instance().setStyleSheet(dark_stylesheet)
+        app = QApplication.instance()
+        if app:
+            theme_manager.apply_theme(app, "dark")
+        self.apply_current_theme_styles()
         
     def apply_light_theme(self):
         """Apply light theme to the entire application"""
-        light_stylesheet = """
-            QMainWindow {
-                background: #F9FAFB;
-                color: #1F2937;
-            }
-            QWidget {
-                background: #F9FAFB;
-                color: #1F2937;
-            }
-            QFrame {
-                background: white;
-                border: 1px solid #E5E7EB;
-                border-radius: 8px;
-            }
-            QPushButton {
-                background: #d6733a;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-            }
-            QPushButton:hover {
-                background: #b45131;
-            }
-            QPushButton:checked {
-                background: #b45131;
-                border-color: #b45131;
-            }
-            QLineEdit {
-                background: white;
-                color: #1F2937;
-                border: 1px solid #E5E7EB;
-                border-radius: 6px;
-                padding: 8px 12px;
-            }
-            QComboBox {
-                background: white;
-                color: #1F2937;
-                border: 1px solid #E5E7EB;
-                border-radius: 6px;
-                padding: 8px 12px;
-            }
-            QLabel {
-                color: #1F2937;
-            }
-        """
-        QApplication.instance().setStyleSheet(light_stylesheet)
+        app = QApplication.instance()
+        if app:
+            theme_manager.apply_theme(app, "light")
+        self.apply_current_theme_styles()
+    
+    def apply_current_theme_styles(self):
+        """Reapply palette-driven styles so inline QSS matches the active theme."""
+        try:
+            # Central/root backgrounds
+            self._apply_root_backgrounds()
+            if hasattr(self, "nav_bar"):
+                self.nav_bar.refresh_theme(theme_manager.current_theme)
+            # Rebuild palette-dependent sections
+            if hasattr(self, "overview_layout"):
+                self.rebuild_overview_cards()
+            if hasattr(self, "metrics_carousel"):
+                self.metrics_carousel.refresh_metrics_cards()
+            # Rebuild accounts page so card styles pick up the palette
+            if hasattr(self, "refresh_accounts_page"):
+                self.refresh_accounts_page()
+            # Refresh dashboard widgets that use theme_color helpers
+            self.refresh_dashboard()
+            # Always refresh recent transactions so inline styles update even if not on dashboard
+            if hasattr(self, "recent_transactions_layout"):
+                self.refresh_recent_transactions()
+        except Exception as e:
+            logger.warning(f"[theme] apply_current_theme_styles failed: {e}")
         
     def apply_accent_color(self, color):
         """Apply custom accent color throughout the application"""

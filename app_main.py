@@ -11,6 +11,7 @@ QApplication.setAttribute(Qt.AA_EnableHighDpiScaling,True)
 from core.theme_manager import theme_manager
 from core.config import Config
 from core.logger import logger
+from core.user_settings import UserSettings
 
 
 class PennyWiseApp:
@@ -18,6 +19,8 @@ class PennyWiseApp:
 
     def __init__(self):
         self.app = QApplication(sys.argv)
+        # Prevent app from quitting when the last window closes during transitions (e.g., login -> dashboard)
+        self.app.setQuitOnLastWindowClosed(False)
         self.dashboard = None
         self.login_window = None
         self.dashboard_started = False
@@ -28,7 +31,17 @@ class PennyWiseApp:
         """Setup application-wide settings"""
         # Apply theme
         theme_manager.load_stylesheets()
-        theme_manager.apply_theme(self.app,"light")
+        # Load user theme preference if available
+        default_theme = "light"
+        try:
+            # If no user yet, fallback to light; once login succeeds, the dashboard will reapply
+            # but we try to respect persisted setting when possible.
+            if self.user_id:
+                us = UserSettings(self.user_id)
+                default_theme = "dark" if us.settings.get("dark_mode") else "light"
+        except Exception as e:
+            logger.warning(f"Could not load user theme preference, using light: {e}")
+        theme_manager.apply_theme(self.app, default_theme)
 
         # App metadata
         self.app.setApplicationName("PennyWise")
@@ -169,6 +182,14 @@ class PennyWiseApp:
         if not QApplication.instance():
             print("QApplication not initialized!")
             return
+
+        # Re-apply theme using the logged-in user's preference (source of truth)
+        try:
+            us = UserSettings(self.user_id)
+            user_theme = "dark" if us.is_dark_mode_enabled() else "light"
+            theme_manager.apply_theme(self.app, user_theme)
+        except Exception as e:
+            logger.warning(f"Could not apply user theme preference, keeping current theme: {e}")
 
         try:
             # Import and create the new dashboard

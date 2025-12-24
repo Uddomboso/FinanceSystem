@@ -30,9 +30,10 @@ def apply_institution_migration():
         
         has_institution_id = 'institution_id' in columns
         has_institution_name = 'institution_name' in columns
+        has_institution_logo = 'institution_logo' in columns
         has_is_primary = 'is_primary' in columns
         
-        if has_institution_id and has_institution_name and has_is_primary:
+        if has_institution_id and has_institution_name and has_institution_logo and has_is_primary:
             print("[OK] All institution columns already exist")
             conn.close()
             return True
@@ -55,6 +56,14 @@ def apply_institution_migration():
             except sqlite3.OperationalError as e:
                 if "duplicate column" not in str(e).lower():
                     print(f"  [WARN] Could not add institution_name: {e}")
+        
+        if not has_institution_logo:
+            try:
+                cursor.execute("ALTER TABLE accounts ADD COLUMN institution_logo TEXT")
+                print("  [OK] Added institution_logo column")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    print(f"  [WARN] Could not add institution_logo: {e}")
         
         if not has_is_primary:
             try:

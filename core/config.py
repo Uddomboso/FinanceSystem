@@ -11,13 +11,19 @@ class Config:
     GROQ_API_KEY = os.getenv("GROQ_API_KEY","demo_mode")
     PLAID_CLIENT_ID = os.getenv("PLAID_CLIENT_ID","demo_plaid_id")
     PLAID_SECRET = os.getenv("PLAID_SECRET","demo_plaid_secret")
+    
+    # Stripe API Keys (for ACH payments)
+    STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "sk_test_demo")
+    STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "pk_test_demo")
 
     # Feature Flags
     # DEMO_MODE is True only if BOTH Plaid AND GROQ are in demo mode
     PLAID_IN_DEMO = PLAID_CLIENT_ID == "demo_plaid_id" or PLAID_SECRET == "demo_plaid_secret"
     GROQ_IN_DEMO = GROQ_API_KEY == "demo_mode"
+    STRIPE_IN_DEMO = STRIPE_SECRET_KEY == "sk_test_demo" or STRIPE_SECRET_KEY.startswith("sk_test_demo")
     DEMO_MODE = PLAID_IN_DEMO and GROQ_IN_DEMO
     PLAID_ENABLED = not PLAID_IN_DEMO
+    STRIPE_ENABLED = not STRIPE_IN_DEMO
 
     # App Settings
     APP_NAME = "PennyWise v2"

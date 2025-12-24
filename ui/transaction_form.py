@@ -380,6 +380,19 @@ class TransactionForm(QWidget):
             recur = int(self.recurring.isChecked())
             add_txn(self.user_id, acc_id, cat_id, amt, tx_type, description, now, recur)
             
+            # Update simulated_balance for developer testing
+            # In production, Stripe/Plaid handles real balance changes
+            if tx_type == "expense":
+                execute_query("""
+                    UPDATE accounts SET simulated_balance = simulated_balance - ?
+                    WHERE id = ? AND simulated_balance IS NOT NULL
+                """, (amt, acc_id), commit=True)
+            elif tx_type == "income":
+                execute_query("""
+                    UPDATE accounts SET simulated_balance = simulated_balance + ?
+                    WHERE id = ? AND simulated_balance IS NOT NULL
+                """, (amt, acc_id), commit=True)
+            
             # Mark commitment as paid - Priority 1: If "Pay Now" was used (pending_commitment_id exists)
             # Priority 2: Try automatic matching
             commitment_matched = False
@@ -403,6 +416,12 @@ class TransactionForm(QWidget):
                     # Refresh commitment tracker and dashboard
                     if self.parent_dashboard and hasattr(self.parent_dashboard, 'commitment_tracker'):
                         self.parent_dashboard.commitment_tracker.load_commitments()
+                    # Also refresh dashboard metrics so Balance After Commitments updates
+                    if self.parent_dashboard:
+                        if hasattr(self.parent_dashboard, 'refresh_metrics_cards_main'):
+                            self.parent_dashboard.refresh_metrics_cards_main()
+                        if hasattr(self.parent_dashboard, 'metrics_carousel'):
+                            self.parent_dashboard.metrics_carousel.refresh_metrics_cards()
                 # Priority 2: Try automatic matching if no explicit commitment
                 elif cat_id:
                     from core.transactions import try_mark_commitment_for_txn
@@ -415,6 +434,12 @@ class TransactionForm(QWidget):
                         # Refresh commitment tracker
                         if self.parent_dashboard and hasattr(self.parent_dashboard, 'commitment_tracker'):
                             self.parent_dashboard.commitment_tracker.load_commitments()
+                        # Also refresh dashboard metrics when an automatic match occurs
+                        if self.parent_dashboard:
+                            if hasattr(self.parent_dashboard, 'refresh_metrics_cards_main'):
+                                self.parent_dashboard.refresh_metrics_cards_main()
+                            if hasattr(self.parent_dashboard, 'metrics_carousel'):
+                                self.parent_dashboard.metrics_carousel.refresh_metrics_cards()
                     else:
                         print(f"⚠️ No commitment matched for category_id={cat_id}, amount={amt}, description={description}")
             except Exception as e:
@@ -541,10 +566,10 @@ class TransactionForm(QWidget):
                     background: rgba(255, 255, 255, 0.2);
                 }
                 QProgressBar::chunk {
-                    background: #d6733a;
+                    background: %s;
                     border-radius: 6px;
                 }
-            """)
+            """ % PennyColors.ACCENT)
             processing_layout.addWidget(self.progress_bar)
             
             # Amount label
@@ -590,10 +615,10 @@ class TransactionForm(QWidget):
                 min-width: 80px;
             }}
             QMessageBox QPushButton:hover {{
-                background-color: #1D4ED8;
+                    background-color: {PennyColors.PRIMARY};
             }}
             QMessageBox QPushButton:pressed {{
-                background-color: #1E40AF;
+                    background-color: {PennyColors.PRIMARY};
             }}
         """)
         
@@ -635,10 +660,10 @@ class TransactionForm(QWidget):
                     min-width: 80px;
                 }}
                 QPushButton:hover {{
-                    background-color: #1D4ED8;
+                        background-color: {PennyColors.PRIMARY};
                 }}
                 QPushButton:pressed {{
-                    background-color: #1E40AF;
+                        background-color: {PennyColors.PRIMARY};
                 }}
             """)
         
@@ -664,7 +689,11 @@ class TransactionForm(QWidget):
             "This helps test how PennyWise will respond when real transactions occur. "
             "Transactions will appear in the history and trigger Smart Detect and commitment matching."
         )
-        info_label.setStyleSheet(f"color: {PennyColors.TEXT_SECONDARY}; font-size: 12px; margin-bottom: 15px; background-color: #FEF3C7; padding: 12px; border-radius: 8px; border-left: 4px solid {PennyColors.WARNING};")
+        info_label.setStyleSheet(
+            f"color: {PennyColors.TEXT_SECONDARY}; font-size: 12px; margin-bottom: 15px; "
+            f"background-color: {PennyColors.PENNY_VOICE}; padding: 12px; border-radius: 8px; "
+            f"border-left: 4px solid {PennyColors.WARNING};"
+        )
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
         
@@ -719,7 +748,7 @@ class TransactionForm(QWidget):
                 margin-top: 10px;
             }}
             QPushButton:hover {{
-                background-color: #1D4ED8;
+                background-color: {PennyColors.PRIMARY};
             }}
         """)
         simulate_custom_btn.clicked.connect(self.simulate_custom_transaction)

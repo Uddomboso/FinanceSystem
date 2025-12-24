@@ -1,6 +1,7 @@
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QComboBox, QMessageBox
 )
+from assets.styles.penny_colors import PennyColors
 from core.transfer import transfer_to_category
 from database.db_manager import fetch_all
 
@@ -22,19 +23,62 @@ class TransferForm(QWidget):
         self.init_ui()
 
     def init_ui(self):
+        p = PennyColors.get_palette("light")
+        label_style = f"color: {p['text_primary']}; font-size: 13px;"
+        input_style = f"""
+            QLineEdit, QComboBox {{
+                background: {p['surface']};
+                color: {p['text_primary']};
+                border: 1px solid {p['border']};
+                border-radius: 8px;
+                padding: 8px 10px;
+                selection-background-color: {p['primary']};
+            }}
+            QLineEdit:focus, QComboBox:focus {{
+                border: 1px solid {p['accent']};
+            }}
+        """
+        btn_style = f"""
+            QPushButton {{
+                background: {p['accent']};
+                color: {p['surface']};
+                border: none;
+                border-radius: 10px;
+                padding: 10px 14px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: {PennyColors.GRADIENTS['accent'].split('stop:1 ')[1].rstrip(')')};
+            }}
+        """
+
         box = QVBoxLayout()
-        box.addWidget(QLabel("Amount"))
+
+        amt_label = QLabel("Amount")
+        amt_label.setStyleSheet(label_style)
+        box.addWidget(amt_label)
+        self.amount_input.setStyleSheet(input_style)
         box.addWidget(self.amount_input)
 
-        box.addWidget(QLabel("From Account"))
+        from_label = QLabel("From Account")
+        from_label.setStyleSheet(label_style)
+        box.addWidget(from_label)
+        self.acc_input.setStyleSheet(input_style)
         box.addWidget(self.acc_input)
 
-        box.addWidget(QLabel("To Category"))
+        to_label = QLabel("To Category")
+        to_label.setStyleSheet(label_style)
+        box.addWidget(to_label)
+        self.cat_input.setStyleSheet(input_style)
         box.addWidget(self.cat_input)
 
-        box.addWidget(QLabel("Note (optional)"))
+        note_label = QLabel("Note (optional)")
+        note_label.setStyleSheet(label_style)
+        box.addWidget(note_label)
+        self.note_input.setStyleSheet(input_style)
         box.addWidget(self.note_input)
 
+        self.save_btn.setStyleSheet(btn_style)
         box.addWidget(self.save_btn)
         self.setLayout(box)
 

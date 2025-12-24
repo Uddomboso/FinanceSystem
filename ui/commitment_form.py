@@ -4,10 +4,11 @@ from PyQt5.QtWidgets import (
     QGraphicsDropShadowEffect,QWidget,QDateEdit,QTextEdit,
     QRadioButton,QButtonGroup,QScrollArea
 )
-from PyQt5.QtCore import Qt, QDate, QTimer
+from PyQt5.QtCore import Qt, QDate, QTimer, pyqtSignal
 from PyQt5.QtGui import QFont, QColor, QPalette
 from database.db_manager import fetch_all,fetch_one,execute_query
 import qtawesome as qta
+from core.logger import logger
 
 
 class ModernDialogHeader(QWidget):
@@ -82,6 +83,8 @@ class ModernDialogHeader(QWidget):
 
 
 class CommitmentForm(QDialog):
+    commitment_added = pyqtSignal(float)
+
     def __init__(self,user_id,category_name=None,parent_dashboard=None):
         super().__init__()
         self.user_id = user_id
@@ -584,6 +587,9 @@ class CommitmentForm(QDialog):
                 if reply == QMessageBox.No:
                     return
             
+            # Emit optimistic delta signal for fast UI updates
+            self._emit_commitment_delta(amount)
+
             # STEP 4: Save commitment in background (after UI update)
             # Run table alterations and commitment save asynchronously
             def save_commitment_background():
@@ -666,6 +672,14 @@ class CommitmentForm(QDialog):
             QMessageBox.critical(self,"Error",f"Could not save commitment: {e}")
             import traceback
             traceback.print_exc()
+
+    def _emit_commitment_delta(self, amount: float):
+        """Emit commitment delta signal with logging for easier debugging."""
+        try:
+            logger.info(f"[CommitmentForm] Emitting commitment_added (+{amount:.2f})")
+        except Exception:
+            pass
+        self.commitment_added.emit(float(amount))
     
     def show_commitment_created_dialog(self, name, amount, due_day, detection_method):
         """Show a beautifully styled commitment created dialog"""

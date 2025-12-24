@@ -132,13 +132,6 @@ class SavingsForm(QDialog):
         goal_header = self.create_section_header("Savings Goal Details")
         content_layout.addWidget(goal_header)
         
-        goal_name_label = QLabel("Goal Name:")
-        content_layout.addWidget(goal_name_label)
-        self.goal_name_input = QLineEdit()
-        self.goal_name_input.setPlaceholderText("e.g., Vacation Fund, Emergency Fund, House Down Payment")
-        self.goal_name_input.setFixedHeight(40)
-        content_layout.addWidget(self.goal_name_input)
-        
         target_amount_label = QLabel("Target Amount:")
         content_layout.addWidget(target_amount_label)
         self.target_amount_input = QLineEdit()
@@ -249,11 +242,8 @@ class SavingsForm(QDialog):
     def save_savings_goal(self):
         """Save the savings goal"""
         try:
-            # Validate inputs
-            goal_name = self.goal_name_input.text().strip()
-            if not goal_name:
-                QMessageBox.warning(self, "Validation Error", "Please enter a goal name.")
-                return
+            # Savings is always just "Savings" - no custom name needed
+            goal_name = "Savings"
             
             target_amount_str = self.target_amount_input.text().strip()
             if not target_amount_str:
@@ -288,8 +278,8 @@ class SavingsForm(QDialog):
             # Calculate target date
             target_date = f"{target_year}-{target_month:02d}-01"
             
-            # Create or update savings category
-            category_name = f"Savings: {goal_name}"
+            # Create or update savings category - just "Savings"
+            category_name = "Savings"
             
             # Check if category already exists
             existing_category = fetch_one("""
@@ -320,11 +310,28 @@ class SavingsForm(QDialog):
                 """, (self.user_id, category_name))
                 category_id = new_category['category_id']
             
-            # Save savings goal details (if you have a savings_goals table)
-            # For now, we'll store it in the category notes or create a separate table
-            # This is a simplified version - you might want to create a dedicated savings_goals table
+            # Create or update the commitment entry in category_commitments
+            # This is what makes it show up in the Monthly Commitments section
+            existing_commitment = fetch_one("""
+                SELECT commitment_id FROM category_commitments 
+                WHERE user_id = ? AND category_id = ?
+            """, (self.user_id, category_id))
             
-            QMessageBox.information(self, "Success", f"Savings goal '{goal_name}' saved successfully!")
+            if existing_commitment:
+                # Update existing commitment
+                execute_query("""
+                    UPDATE category_commitments 
+                    SET amount = ?, is_paid = 0
+                    WHERE commitment_id = ?
+                """, (monthly_amount, existing_commitment['commitment_id']), commit=True)
+            else:
+                # Create new commitment with monthly contribution amount
+                execute_query("""
+                    INSERT INTO category_commitments (user_id, category_id, amount, due_day, is_paid, created_at)
+                    VALUES (?, ?, ?, 1, 0, ?)
+                """, (self.user_id, category_id, monthly_amount, datetime.now().isoformat()), commit=True)
+            
+            QMessageBox.information(self, "Success", "Savings goal saved successfully!")
             
             # Refresh dashboard if parent exists
             if self.parent_dashboard:
