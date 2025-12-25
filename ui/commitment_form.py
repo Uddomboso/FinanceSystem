@@ -84,6 +84,7 @@ class ModernDialogHeader(QWidget):
 
 class CommitmentForm(QDialog):
     commitment_added = pyqtSignal(float)
+    commitments_changed = pyqtSignal()
 
     def __init__(self,user_id,category_name=None,parent_dashboard=None):
         super().__init__()
@@ -642,7 +643,12 @@ class CommitmentForm(QDialog):
             QTimer.singleShot(100, save_commitment_background)
             
             # Close the dialog immediately so user can see their commitment
-            self.accept()
+            result = self.accept()
+            if result == QDialog.Accepted:
+                # Reload commitments so the new entry appears immediately
+                self.load_commitments()
+                self.trigger_dashboard_refresh()
+                self.commitments_changed.emit()
             
             # Show success dialog (non-blocking)
             self.show_commitment_created_dialog(name, amount, due_day, detection_method)

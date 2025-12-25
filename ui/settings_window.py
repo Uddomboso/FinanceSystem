@@ -158,12 +158,25 @@ class SettingsWindow(QWidget):
         for label, tone, extra in self._label_styles:
             self._apply_label_style(label, tone, extra)
 
+        # Fallback: restyle all labels (for any not registered)
+        for lbl in self.findChildren(QLabel):
+            lbl.setStyleSheet(f"color: {p['text_primary']};")
+
         # Controls
+        # Keep legacy registered sets
         for cb in self._all_checkboxes:
             cb.setStyleSheet(self._checkbox_style)
         for combo in self._all_combos:
             combo.setStyleSheet(self._combo_style)
         for le in self._all_lineedits:
+            le.setStyleSheet(self._lineedit_style)
+
+        # Refresh all checkboxes/combos/lineedits even if not registered (forward compatibility)
+        for cb in self.findChildren(QCheckBox):
+            cb.setStyleSheet(self._checkbox_style)
+        for combo in self.findChildren(QComboBox):
+            combo.setStyleSheet(self._combo_style)
+        for le in self.findChildren(QLineEdit):
             le.setStyleSheet(self._lineedit_style)
 
         # Groups
@@ -1108,6 +1121,16 @@ class SettingsWindow(QWidget):
             finally:
                 self._refreshing_theme = False
         super().changeEvent(event)
+
+    def showEvent(self, event):
+        """Ensure styles are refreshed when the window becomes visible."""
+        try:
+            if not self._refreshing_theme:
+                self._refreshing_theme = True
+                self.refresh_theme_ui()
+        finally:
+            self._refreshing_theme = False
+        super().showEvent(event)
 
 
 # Theme stylesheets for reference

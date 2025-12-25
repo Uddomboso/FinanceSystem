@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QStatusBar,QMenu,QSystemTrayIcon,QGridLayout, QSpacerItem,
     QWidgetAction,QDialog,QRadioButton,QButtonGroup
 )
-from PyQt5.QtCore import Qt,QTimer,QPropertyAnimation,QEasingCurve,QSize,QEvent
+from PyQt5.QtCore import Qt,QTimer,QPropertyAnimation,QEasingCurve,QSize,QEvent,pyqtSignal
 from PyQt5.QtGui import QFont,QIcon,QPalette,QColor,QPainter,QPixmap
 from datetime import datetime, timedelta
 
@@ -883,6 +883,10 @@ class MetricsCarousel(QWidget):
         shadow.setYOffset(3)
         shadow.setColor(QColor(0,0,0,25))
         card.setGraphicsEffect(shadow)
+
+        # Expose labels for downstream updates
+        card.title_label = title_label
+        card.value_label = value_label
 
         return card
 
@@ -1949,12 +1953,29 @@ class CommitmentTrackerWidget(QWidget):
         """Mark commitment as paid manually - NO transaction created"""
         try:
             from core.commitment_manager import mark_commitment_paid_manually
+            amount = 0.0
+            try:
+                row = fetch_one("""
+                    SELECT amount FROM category_commitments
+                    WHERE commitment_id = ? AND user_id = ?
+                """, (commitment_id, self.user_id))
+                if row and ("amount" in row.keys()):
+                    amount = float(row["amount"] or 0.0)
+            except Exception:
+                amount = 0.0
 
             success = mark_commitment_paid_manually(self.user_id,commitment_id)
             if success:
                 QMessageBox.information(self,"Success",f"{category_name} marked as paid!")
                 self.load_commitments()
-                # Refresh dashboard metrics to update available balance IMMEDIATELY
+                # Emit negative delta immediately
+                if self.parent_dashboard and hasattr(self.parent_dashboard, 'handle_commitment_delta'):
+                    try:
+                        logger.info(f"[commitment_delta] emitting paid delta -{amount:.2f} for commitment_id={commitment_id}")
+                    except Exception:
+                        pass
+                    self.parent_dashboard.handle_commitment_delta(-amount)
+                # Refresh dashboard metrics to update available balance (safety net)
                 self.trigger_dashboard_refresh()
                 # Trigger commitment check to update notifications (after refresh)
                 from core.commitment_manager import check_commitments
@@ -1976,10 +1997,16 @@ class CommitmentTrackerWidget(QWidget):
 
                 QMessageBox.information(self,"Success",f"{category_name} marked as paid!")
                 self.load_commitments()
-                # Refresh dashboard metrics to update available balance IMMEDIATELY
+                # Emit negative delta immediately
+                if self.parent_dashboard and hasattr(self.parent_dashboard, 'handle_commitment_delta'):
+                    try:
+                        logger.info(f"[commitment_delta] emitting paid delta (fallback) -{amount:.2f} for commitment_id={commitment_id}")
+                    except Exception:
+                        pass
+                    self.parent_dashboard.handle_commitment_delta(-amount)
+                # Refresh dashboard metrics as safety net
                 if self.parent_dashboard:
                     self.parent_dashboard.refresh_dashboard()
-                    # CRITICAL: Explicitly refresh metrics cards to update "Price After Commitments"
                     if hasattr(self.parent_dashboard, 'refresh_metrics_cards_main'):
                         self.parent_dashboard.refresh_metrics_cards_main()
                     if hasattr(self.parent_dashboard, 'metrics_carousel'):
@@ -2482,9 +2509,14 @@ class CommitmentTrackerWidget(QWidget):
             return
 
         # Show modern commitment form
-        dlg = CommitmentForm(self.user_id, parent_dashboard=self.parent_dashboard, category_name="Custom Commitment")
+        # Ensure the dialog talks to the real DashboardMain instance
+        target_dashboard = self.parent_dashboard if self.parent_dashboard else self
+        dlg = CommitmentForm(self.user_id, parent_dashboard=target_dashboard, category_name="Custom Commitment")
         if hasattr(dlg, 'commitment_added'):
-            dlg.commitment_added.connect(self.handle_commitment_added_signal)
+            dlg.commitment_added.connect(target_dashboard.handle_commitment_delta if hasattr(target_dashboard, 'handle_commitment_delta') else self.handle_commitment_added_signal)
+        # Connect the signal for all commitment mutations
+        if hasattr(dlg, 'commitments_changed'):
+            dlg.commitments_changed.connect(target_dashboard.balances_update_requested.emit)
 
         result = dlg.exec_()
         if result == QDialog.Accepted:
@@ -2492,14 +2524,14 @@ class CommitmentTrackerWidget(QWidget):
             self.load_commitments()
             self.trigger_dashboard_refresh()
     def handle_commitment_added_signal(self, amount):
-        """Forward commitment delta to the main dashboard if available."""
+        """Forward commitment delta to the main dashboard."""
         if self.parent_dashboard and hasattr(self.parent_dashboard, 'handle_commitment_delta'):
             self.parent_dashboard.handle_commitment_delta(amount)
-        self.trigger_dashboard_refresh()
 
 
 class DashboardMain(QMainWindow):
     """Modern Dashboard with Navigation & Notifications"""
+    balances_update_requested = pyqtSignal()
 
     def __init__(self,user_id,username,show_tutorial=True):
         super().__init__()
@@ -2507,6 +2539,8 @@ class DashboardMain(QMainWindow):
         self.username = username
         self.previous_mood = None
         self.penny_personality = None
+        # Connect the class-level signal to the recompute+render method
+        self.balances_update_requested.connect(self.update_balance_cards_from_db)
 
         # Initialize database v3 with settings support
         from database.db_manager import initialize_database_v3
@@ -2587,93 +2621,139 @@ class DashboardMain(QMainWindow):
         except Exception as e:
             logger.warning(f"[dashboard] refresh_balance_cards error: {e}")
 
-    def rebuild_overview_cards(self):
-        """Rebuild the top balance cards with fresh data."""
+    def update_balance_cards_from_db(self):
+        """
+        Single authoritative recompute+render path for all balance and commitment UI.
+        - Queries latest account balance and unpaid commitment sum from DB
+        - Computes available_balance and balance_after_commitments (no caching)
+        - Updates all UI widgets directly
+        - Fails loudly if any widget is missing
+        - No partial refresh, no try/except hiding errors
+        """
+        from database.db_manager import fetch_one
+        checking_balance_row = fetch_one("""
+            SELECT SUM(
+                CASE 
+                    WHEN transaction_type = 'income' THEN amount 
+                    WHEN transaction_type = 'expense' THEN -amount 
+                    ELSE 0 
+                END
+            ) as balance
+            FROM transactions
+            WHERE user_id = ?
+        """, (self.user_id,))
+        raw_balance = float(checking_balance_row["balance"] if checking_balance_row and checking_balance_row["balance"] is not None else 0)
+        if raw_balance < 0:
+            logger.warning(f"[balances] Negative raw checking balance fetched for user={self.user_id}: {raw_balance}")
+        unpaid_row = fetch_one("""
+            SELECT COALESCE(SUM(amount), 0) AS total
+            FROM category_commitments
+            WHERE user_id = ? AND COALESCE(is_paid, 0) = 0
+        """, (self.user_id,))
+        unpaid_sum = float(unpaid_row["total"] if unpaid_row and unpaid_row["total"] is not None else 0)
+        available_balance = max(0, raw_balance)
+        balance_after_commitments = max(0, raw_balance - unpaid_sum)
+        user_currency = fetch_one("SELECT currency FROM settings WHERE user_id = ?", (self.user_id,))
+        if user_currency and "currency" in user_currency.keys():
+            currency = user_currency["currency"]
+        else:
+            currency = "USD"
+        if not hasattr(self, "overview_layout"):
+            raise RuntimeError("overview_layout missing in dashboard")
+        while self.overview_layout.count():
+            item = self.overview_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        savings_row = fetch_one("""
+            SELECT COALESCE(SUM(t.amount), 0) AS total
+            FROM transactions t
+            LEFT JOIN categories c ON t.category_id = c.category_id
+            WHERE t.user_id = ? 
+            AND t.transaction_type = 'income'
+            AND c.category_name = 'Savings'
+        """, (self.user_id,))
+        savings = savings_row["total"] if savings_row and savings_row["total"] is not None else 0
+        savings_card = self.create_finance_card(
+            "Savings Balance",
+            f"{currency} {savings:,.2f}",
+            theme_color('success'),
+            "positive"
+        )
+        commitments_card = self.create_finance_card(
+            "Balance After Commitments",
+            f"{currency} {balance_after_commitments:,.2f}",
+            theme_color('warning'),
+            "warning"
+        )
+        commitments_card.setFixedHeight(180)
+        available_card = self.create_finance_card(
+            "Available Balance",
+            f"{currency} {available_balance:,.2f}",
+            theme_color('success'),
+            "positive"
+        )
+        self.overview_layout.addWidget(savings_card)
+        self.overview_layout.addWidget(commitments_card)
+        self.overview_layout.addWidget(available_card)
+
+    def handle_commitment_delta(self, delta: float):
+        """
+        Apply a commitment delta (positive on add, negative on mark-paid) without full refresh.
+        Updates cached totals and the commitments card immediately.
+        """
         try:
-            from database.db_manager import fetch_one
+            before_unpaid = float(getattr(self, "current_unpaid_commitments_total", 0) or 0)
+            before_price = float(getattr(self, "current_price_after_commitments", 0) or 0)
+            currency = getattr(self, "current_currency", "USD") or "USD"
+        except Exception:
+            before_unpaid = 0.0
+            before_price = 0.0
+            currency = "USD"
 
-            # Compute checking balance from transactions (fallback approach)
-            checking_balance_row = fetch_one("""
-                SELECT SUM(
-                    CASE 
-                        WHEN transaction_type = 'income' THEN amount 
-                        WHEN transaction_type = 'expense' THEN -amount 
-                        ELSE 0 
-                    END
-                ) as balance
-                FROM transactions
-                WHERE user_id = ?
-            """,(self.user_id,))
-            checking_balance = checking_balance_row["balance"] if checking_balance_row and checking_balance_row["balance"] is not None else 0
+        try:
+            logger.info(
+                f"[commitment_delta] user={self.user_id} delta={delta:+.2f} "
+                f"unpaid_before={before_unpaid:.2f} price_before={before_price:.2f}"
+            )
+        except Exception:
+            pass
 
-            # Compute savings from transactions tagged Savings (income)
-            savings_row = fetch_one("""
-                SELECT COALESCE(SUM(t.amount), 0) AS total
-                FROM transactions t
-                LEFT JOIN categories c ON t.category_id = c.category_id
-                WHERE t.user_id = ? 
-                AND t.transaction_type = 'income'
-                AND c.category_name = 'Savings'
-            """,(self.user_id,))
-            savings = savings_row["total"] if savings_row and savings_row["total"] is not None else 0
+        new_unpaid = before_unpaid + float(delta or 0)
+        new_price_after = float(getattr(self, "current_available_balance", 0) or 0) - new_unpaid
 
-            # Compute unpaid commitments sum
-            unpaid_row = fetch_one("""
-                SELECT COALESCE(SUM(amount), 0) AS total
-                FROM category_commitments
-                WHERE user_id = ? AND COALESCE(is_paid, 0) = 0
-            """,(self.user_id,))
-            unpaid_sum = unpaid_row["total"] if unpaid_row and unpaid_row["total"] is not None else 0
+        self.current_unpaid_commitments_total = new_unpaid
+        self.current_price_after_commitments = new_price_after
 
-            # Currency
-            user_currency = fetch_one("SELECT currency FROM settings WHERE user_id = ?",(self.user_id,))
+        try:
+            logger.info(
+                f"[commitment_delta] user={self.user_id} unpaid_after={new_unpaid:.2f} "
+                f"price_after={new_price_after:.2f}"
+            )
+        except Exception:
+            pass
+
+        # Update the commitments card value label directly
+        if hasattr(self, "commitments_value_label") and self.commitments_value_label:
             try:
-                currency = user_currency["currency"] if user_currency and "currency" in user_currency.keys() else "USD"
-            except (KeyError, TypeError, AttributeError):
-                currency = "USD"
+                self.commitments_value_label.setText(f"{currency} {new_price_after:,.2f}")
+                logger.info(f"[commitment_delta] card updated value={currency} {new_price_after:,.2f}")
+            except Exception as e:
+                logger.warning(f"[commitment_delta] failed to update card label: {e}")
+        else:
+            # Fallback: lightweight balance card refresh if label missing
+            try:
+                self.refresh_balance_cards()
+                logger.info("[commitment_delta] fallback refresh_balance_cards invoked")
+            except Exception as e:
+                logger.warning(f"[commitment_delta] fallback refresh failed: {e}")
 
-            # Balances
-            available_balance = checking_balance
-            price_after_commitments = checking_balance - unpaid_sum
-
-            logger.info(f"[overview_rebuild] user={self.user_id} checking={checking_balance} savings={savings} unpaid={unpaid_sum} price_after={price_after_commitments}")
-
-            # Clear existing overview layout
-            if hasattr(self, 'overview_layout'):
-                while self.overview_layout.count():
-                    item = self.overview_layout.takeAt(0)
-                    w = item.widget()
-                    if w:
-                        w.deleteLater()
-
-                savings_card = self.create_finance_card(
-                    "Savings Balance",
-                    f"{currency} {savings:,.2f}",
-                    theme_color('success'),
-                    "positive"
-                )
-
-                commitments_card = self.create_finance_card(
-                    "Balance After Commitments",
-                    f"{currency} {price_after_commitments:,.2f}",
-                    theme_color('warning'),
-                    "warning"
-                )
-                commitments_card.setFixedHeight(180)
-
-                available_card = self.create_finance_card(
-                    "Available Balance",
-                    f"{currency} {available_balance:,.2f}",
-                    theme_color('success'),
-                    "positive"
-                )
-
-                self.overview_layout.addWidget(savings_card)
-                self.overview_layout.addWidget(commitments_card)
-                self.overview_layout.addWidget(available_card)
-
-        except Exception as e:
-            logger.warning(f"[overview_rebuild] error: {e}")
+        # Lightweight repaint only
+        try:
+            from PyQt5.QtWidgets import QApplication
+            QApplication.processEvents()
+        except Exception:
+            pass
 
     def force_full_refresh(self):
         """Force a comprehensive, synchronous refresh of dashboard data."""
@@ -3938,6 +4018,10 @@ class DashboardMain(QMainWindow):
 
             # Calculate balances
             price_after_commitments = checking_balance - commitments  # what's left after paying all unpaid commitments
+            # Cache for signal-driven updates
+            self.current_available_balance = checking_balance
+            self.current_unpaid_commitments_total = commitments
+            self.current_price_after_commitments = price_after_commitments
             logger.info(
                 f"[overview_cards] user={self.user_id} checking_balance={checking_balance} "
                 f"savings_balance={savings} unpaid_commitments={commitments} "
@@ -3951,6 +4035,7 @@ class DashboardMain(QMainWindow):
                 currency = user_currency["currency"] if user_currency and "currency" in user_currency.keys() else "USD"
             except (KeyError, TypeError, AttributeError):
                 currency = "USD"
+            self.current_currency = currency
 
             # Create the 3 cards - show empty cards with buttons when balance is 0 or no account
             # Check if accounts exist
@@ -4006,11 +4091,14 @@ class DashboardMain(QMainWindow):
                 theme_color('warning'),
                 "warning"
             )
-            
+            self.commitments_card = commitments_card
+            if hasattr(commitments_card, "value_label"):
+                self.commitments_value_label = commitments_card.value_label
+
             # Available Balance shows empty card if no account or balance is 0
             if has_main and checking_balance > 0:
                 available_card = self.create_finance_card(
-                    " Available Balance",
+                    "Available Balance",
                     f"{currency} {checking_balance:,.2f}",
                     theme_color('success'),
                     "positive"
@@ -4074,6 +4162,9 @@ class DashboardMain(QMainWindow):
                 "#F59E0B",
                 "warning"
             )
+            self.commitments_card = commitments_card
+            if hasattr(commitments_card, "value_label"):
+                self.commitments_value_label = commitments_card.value_label
 
             available_card = self.create_empty_card(
                 "Available Balance",

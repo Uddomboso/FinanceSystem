@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
     QPushButton, QButtonGroup
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QEvent
 from PyQt5.QtGui import QFont
 from database.db_manager import fetch_all
 from assets.styles.penny_colors import PennyColors
@@ -27,6 +27,7 @@ class ReportsPage(QWidget):
         self.user_id = user_id
         self.chart_type = 'bar'  # Default: bar chart
         self.range_mode = "30d"
+        self._refreshing_theme = False
         self._palette = PennyColors.get_palette(theme_manager.current_theme)
         self.setup_ui()
         self.load_data()
@@ -326,6 +327,18 @@ class ReportsPage(QWidget):
     def refresh(self):
         """Refresh all data"""
         self.load_data()
+
+    def changeEvent(self, event):
+        """Reapply palette styles and redraw chart on theme change without restart."""
+        if event.type() == QEvent.PaletteChange and not self._refreshing_theme:
+            self._refreshing_theme = True
+            try:
+                # Re-style widgets and redraw chart with new palette
+                self._apply_styles()
+                self.create_chart()
+            finally:
+                self._refreshing_theme = False
+        super().changeEvent(event)
 
     # ---- Palette + styling helpers ----
     def _refresh_palette(self):
