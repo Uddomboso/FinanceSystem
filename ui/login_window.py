@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (
     QStackedLayout,QMessageBox,QFrame
 )
 from PyQt5.QtGui import QPixmap
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 import bcrypt
 import os
 
@@ -11,6 +11,8 @@ from database.db_manager import insert_user,fetch_one,execute_query
 
 
 class LoginWindow(QWidget):
+    signup_successful = pyqtSignal(int, str)  # user_id, username
+    
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Login or Sign Up")
@@ -395,7 +397,13 @@ class LoginWindow(QWidget):
             # Create default categories for the new user
             self.create_default_categories(user_id)
 
-            QMessageBox.information(self, "Success", "Account created successfully!")
+            # Create NotificationManager and connect signal for signup success
+            from core.notification_manager import NotificationManager
+            notification_manager = NotificationManager(user_id)
+            self.signup_successful.connect(notification_manager.handle_signup_success)
+            
+            # Emit signal for signup success - NotificationManager will handle notification and toast
+            self.signup_successful.emit(user_id, username)
 
             # Auto-login after signup
             self.hide()

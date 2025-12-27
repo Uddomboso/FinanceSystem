@@ -85,6 +85,7 @@ class ModernDialogHeader(QWidget):
 class CommitmentForm(QDialog):
     commitment_added = pyqtSignal(float)
     commitments_changed = pyqtSignal()
+    commitment_created = pyqtSignal()  # New signal for notification manager
 
     def __init__(self,user_id,category_name=None,parent_dashboard=None):
         super().__init__()
@@ -649,6 +650,8 @@ class CommitmentForm(QDialog):
                 self.load_commitments()
                 self.trigger_dashboard_refresh()
                 self.commitments_changed.emit()
+                # Emit signal for notification manager
+                self.commitment_created.emit()
             
             # Show success dialog (non-blocking)
             self.show_commitment_created_dialog(name, amount, due_day, detection_method)

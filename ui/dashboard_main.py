@@ -77,32 +77,78 @@ def theme_color(token, fallback=None):
     return palette.get("text_primary", "#ffffff")
 # -----------------------------------------------
 
-class NotificationBadge(QLabel):
-    """Small notification badge for navigation items"""
+class NotificationBadge(QWidget):
+    """Interactive notification badge with hover preview and click handling"""
 
-    def __init__(self,count=0,parent=None):
+    def __init__(self, count=0, parent=None):
         super().__init__(parent)
         self.count = count
-        self.setFixedSize(18,18)
-        self.setStyleSheet(f"""
-            NotificationBadge {{
-                background: {theme_color('error')};
-                color: {theme_color('surface')};
-                border-radius: 9px;
-                font-size: 10px;
-                font-weight: bold;
-            }}
-        """)
-        self.setAlignment(Qt.AlignCenter)
+        self.setFixedSize(18, 18)
+        
+        # Enable mouse events on QWidget
+        self.setEnabled(True)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setAttribute(Qt.WA_Hover, True)
+        
         self.update_count(count)
+        
+        # UI components (will be set by parent)
+        self.preview_popup = None
+        self.notification_window = None
+        self.notification_manager = None
 
-    def update_count(self,count):
+    def paintEvent(self, e):
+        """Draw the badge manually"""
+        from PyQt5.QtGui import QPainter, QColor, QFont
+        from PyQt5.QtCore import Qt
+        
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+
+        # Draw circle background
+        p.setBrush(QColor("#dc2626"))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(0, 0, 18, 18)
+
+        # Draw count text
+        p.setPen(Qt.white)
+        p.setFont(QFont("segoe ui", 9, QFont.Bold))
+        text = str(self.count) if self.count <= 99 else "99+"
+        p.drawText(self.rect(), Qt.AlignCenter, text)
+
+    def update_count(self, count):
+        """Update badge count and visibility"""
         self.count = count
         if count > 0:
-            self.setText(str(count) if count <= 99 else "99+")
             self.show()
         else:
             self.hide()
+        self.update()  # Trigger repaint
+
+    def enterEvent(self, event):
+        if hasattr(self, "preview_popup"):
+            self.preview_popup.update_content()
+            self.preview_popup.move(
+                self.mapToGlobal(self.rect().bottomLeft())
+            )
+            self.preview_popup.show()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if hasattr(self, "preview_popup"):
+            self.preview_popup.hide()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            # Find parent DashboardMain and show notifications panel
+            parent = self.parent()
+            while parent and not hasattr(parent, 'show_notifications'):
+                parent = parent.parent()
+            if parent and hasattr(parent, 'show_notifications'):
+                parent.show_notifications()
+        super().mousePressEvent(event)
 
 
 class CustomTitleBar(QWidget):
@@ -714,6 +760,20 @@ class MetricsCarousel(QWidget):
                 ("72%","Goals Progress","up", PennyColors.INFO)
             ]
 
+        # Update notification manager with latest data
+        try:
+            # Find parent dashboard to access notification manager
+            parent = self.parent()
+            while parent and not hasattr(parent, 'notification_manager'):
+                parent = parent.parent()
+            if parent and hasattr(parent, 'notification_manager'):
+                parent.notification_manager.recompute()
+                # Update notification badge
+                if hasattr(parent, 'nav_bar') and hasattr(parent.nav_bar, 'notification_badge'):
+                    parent.nav_bar.notification_badge.update_count(parent.notification_manager.get_unread_count())
+        except Exception as e:
+            logger.error(f"Error updating notification manager: {e}")
+
     def create_metric_card(self,value,label,trend,color):
         """Create a single metric card"""
         p = PennyColors.get_palette(theme_manager.current_theme)
@@ -995,6 +1055,32 @@ class ModernNavigationBar(QWidget):
         self.setup_ui()
         self.refresh_theme(theme_manager.current_theme)
 
+    def setup_notification_manager(self, notification_manager):
+        """Set up notification manager for the badge"""
+        self.notification_manager = notification_manager
+        if hasattr(self, 'notification_badge'):
+            self.notification_badge.notification_manager = notification_manager
+            
+            # Connect notification button to show notifications panel
+            if hasattr(self, 'notification_btn') and self.parent():
+                # Find the DashboardMain parent and connect to show_notifications
+                parent = self.parent()
+                while parent and not hasattr(parent, 'show_notifications'):
+                    parent = parent.parent()
+                if parent and hasattr(parent, 'show_notifications'):
+                    self.notification_btn.clicked.connect(parent.show_notifications)
+            
+            # Attach UI components to badge
+            from ui.notification_popup import NotificationPreviewPopup, NotificationWindow
+            self.notification_badge.preview_popup = NotificationPreviewPopup(
+                notification_manager,
+                self
+            )
+            self.notification_badge.notification_window = NotificationWindow(
+                notification_manager,
+                self.window()
+            )
+
     def get_nav_palette(self, theme_name):
         """Return palette for nav based on theme."""
         return _nav_palette(theme_name)
@@ -1168,10 +1254,13 @@ class ModernNavigationBar(QWidget):
         self.notification_btn.setObjectName("NavNotifButton")
         self.notification_btn.setFixedSize(40,40)
 
-        self.notification_badge = NotificationBadge(3)
+        self.notification_badge = NotificationBadge(0)  # Start with 0, will be updated by manager
         notification_layout.addWidget(self.notification_btn)
         notification_layout.addWidget(self.notification_badge)
         notification_layout.setAlignment(self.notification_badge,Qt.AlignTop | Qt.AlignLeft)
+        
+        # Connect notification button to show notifications (will be wired to parent callback)
+        self.notification_btn.clicked.connect(lambda: None)  # Will be connected in setup_notification_manager
         layout.addWidget(self.notification_container)
 
         # Remove separator under logo for a cleaner, more open sidebar
@@ -1980,6 +2069,11 @@ class CommitmentTrackerWidget(QWidget):
                 # Trigger commitment check to update notifications (after refresh)
                 from core.commitment_manager import check_commitments
                 check_commitments(self.user_id)
+                # Update notification manager
+                if hasattr(self, 'notification_manager'):
+                    self.notification_manager.recompute()
+                    if hasattr(self, 'nav_bar') and hasattr(self.nav_bar, 'notification_badge'):
+                        self.nav_bar.notification_badge.update_count(self.notification_manager.get_unread_count())
             else:
                 QMessageBox.warning(self,"Error","Failed to process payment")
         except Exception as e:
@@ -2014,6 +2108,11 @@ class CommitmentTrackerWidget(QWidget):
                 # Trigger commitment check to update notifications (after refresh)
                 from core.commitment_manager import check_commitments
                 check_commitments(self.user_id)
+                # Update notification manager
+                if hasattr(self, 'notification_manager'):
+                    self.notification_manager.recompute()
+                    if hasattr(self, 'nav_bar') and hasattr(self.nav_bar, 'notification_badge'):
+                        self.nav_bar.notification_badge.update_count(self.notification_manager.get_unread_count())
 
             except Exception as fallback_error:
                 QMessageBox.warning(self,"Error",f"Failed to mark as paid: {str(fallback_error)}")
@@ -2517,6 +2616,9 @@ class CommitmentTrackerWidget(QWidget):
         # Connect the signal for all commitment mutations
         if hasattr(dlg, 'commitments_changed'):
             dlg.commitments_changed.connect(target_dashboard.balances_update_requested.emit)
+        # Connect commitment creation signal for notification updates
+        if hasattr(dlg, 'commitment_created') and hasattr(target_dashboard, 'notification_manager'):
+            dlg.commitment_created.connect(lambda: target_dashboard.update_notification_badge())
 
         result = dlg.exec_()
         if result == QDialog.Accepted:
@@ -2546,10 +2648,22 @@ class DashboardMain(QMainWindow):
         from database.db_manager import initialize_database_v3
         initialize_database_v3()
 
+        # Initialize notification manager
+        from core.notification_manager import NotificationManager
+        self.notification_manager = NotificationManager(self.user_id, self)
+
+        # Connect to notification changes for badge updates
+        if hasattr(self, 'notification_manager'):
+            self.notification_manager.notifications_changed.connect(self.on_notifications_changed)
+            # Initialize notification data
+            self.notification_manager.recompute()
+
         self.setup_window()
-        self.setup_navigation()
         self.setup_ui()
         self.setup_animations()
+
+        # Initialize notifications after UI is ready
+        QTimer.singleShot(500, self.update_notification_badge)
 
         # Tutorial system
         self.tutorial_manager = TutorialManager(self)
@@ -2591,6 +2705,23 @@ class DashboardMain(QMainWindow):
             logger.info("[dashboard] refresh_dashboard completed")
         except Exception:
             pass
+
+    def on_notifications_changed(self, count):
+        """Handle notification count changes safely"""
+        try:
+            # Ensure nav bar and badge exist before updating
+            if hasattr(self, 'nav_bar') and hasattr(self.nav_bar, 'notification_badge'):
+                self.nav_bar.notification_badge.update_count(count)
+        except Exception as e:
+            logger.error(f"Error updating notification badge: {e}")
+
+    def update_notification_badge(self):
+        if not hasattr(self, "notification_manager"):
+            return
+        if not hasattr(self, "nav_bar") or not hasattr(self.nav_bar, "notification_badge"):
+            return
+        count = self.notification_manager.get_unread_count()
+        self.nav_bar.notification_badge.update_count(count)
     
     def refresh_metrics_cards_main(self):
         """Refresh the metrics cards in DashboardMain (not MetricsCarousel)"""
@@ -2850,6 +2981,9 @@ class DashboardMain(QMainWindow):
         # Link Bank page
         from ui.bank_connect_window import BankConnectWindow
         self.page_bank = BankConnectWindow(self.user_id, self)
+        
+        # Connect to commitment form signals for notification updates
+        # We'll connect this when the commitment form is created dynamically
         
         # Add all pages to stack
         self.stack.addWidget(self.page_dashboard)
@@ -3874,6 +4008,255 @@ class DashboardMain(QMainWindow):
         self.stack.setCurrentWidget(self.page_reports)
         self.highlight_nav("Reports")
 
+    def _handle_notification_mark_paid(self, commitment_id):
+        """Handle mark as paid request from notification panel"""
+        try:
+            from core.commitment_manager import mark_commitment_paid_manually
+            from database.db_manager import fetch_one
+            
+            # Get category name for feedback
+            commitment = fetch_one("""
+                SELECT cc.*, c.category_name
+                FROM category_commitments cc
+                JOIN categories c ON cc.category_id = c.category_id
+                WHERE cc.commitment_id = ? AND cc.user_id = ?
+            """, (commitment_id, self.user_id))
+            
+            if not commitment:
+                return
+            
+            # Handle sqlite3.Row object - convert to dict or use bracket notation
+            try:
+                category_name = commitment['category_name'] if 'category_name' in commitment.keys() else 'Commitment'
+            except (KeyError, TypeError):
+                category_name = 'Commitment'
+            
+            # Mark as paid via backend
+            success = mark_commitment_paid_manually(self.user_id, commitment_id)
+            
+            if success:
+                # Update notification manager
+                if hasattr(self, 'notification_manager'):
+                    self.notification_manager.recompute()
+                
+                # Update badge if available
+                if hasattr(self, 'nav_bar') and hasattr(self.nav_bar, 'notification_badge'):
+                    self.nav_bar.notification_badge.update_count(self.notification_manager.get_unread_count())
+                
+                # Refresh notification panel
+                if hasattr(self, 'notification_panel'):
+                    self.notification_panel.refresh_notifications()
+        except Exception as e:
+            logger.error(f"Error handling notification mark paid: {e}")
+    
+    def _handle_notification_manage_payment(self, commitment_id, category_id):
+        """Handle resolve payment request from notification panel - show payment action sheet"""
+        try:
+            from database.db_manager import fetch_one
+            from ui.payment_action_sheet import PaymentActionSheet
+            
+            # Get commitment details including category name and status
+            commitment = fetch_one("""
+                SELECT cc.*, c.category_name, c.category_id
+                FROM category_commitments cc
+                JOIN categories c ON cc.category_id = c.category_id
+                WHERE cc.commitment_id = ? AND cc.user_id = ?
+            """, (commitment_id, self.user_id))
+            
+            if not commitment:
+                return
+            
+            # Handle sqlite3.Row object - convert to dict or use bracket notation
+            try:
+                category_name = commitment['category_name'] if 'category_name' in commitment.keys() else 'Commitment'
+            except (KeyError, TypeError):
+                category_name = 'Commitment'
+            
+            # Build status text from notification manager
+            status_text = "Payment due"
+            if hasattr(self, 'notification_manager'):
+                notifications = self.notification_manager.get_active_notifications()
+                for notif in notifications:
+                    if notif.get('commitment_id') == commitment_id:
+                        notif_type = notif.get('type', '')
+                        if notif_type == 'overdue':
+                            days_overdue = notif.get('days_overdue', 0)
+                            status_text = f"Overdue by {days_overdue} day{'s' if days_overdue != 1 else ''}"
+                        elif notif_type == 'due_soon':
+                            days_until_due = notif.get('days_until_due', 0)
+                            if days_until_due == 0:
+                                status_text = "Due today"
+                            else:
+                                status_text = f"Due in {days_until_due} day{'s' if days_until_due != 1 else ''}"
+                        break
+            
+            # Show payment action sheet
+            action_sheet = PaymentActionSheet(commitment_id, category_name, status_text, self)
+            
+            # Connect signals to handlers
+            action_sheet.pay_now_requested.connect(self._handle_payment_sheet_pay_now)
+            action_sheet.mark_paid_requested.connect(self._handle_payment_sheet_mark_paid)
+            action_sheet.smart_detect_requested.connect(self._handle_payment_sheet_smart_detect)
+            
+            action_sheet.exec_()
+        except Exception as e:
+            logger.error(f"Error handling notification manage payment: {e}")
+    
+    def _handle_payment_sheet_pay_now(self, commitment_id):
+        """Handle Pay Now from payment action sheet - route to transaction form with pre-filled commitment details"""
+        try:
+            from database.db_manager import fetch_one, fetch_all
+            
+            # Get commitment details including category_id, category_name, and amount
+            commitment = fetch_one("""
+                SELECT cc.*, c.category_id, c.category_name
+                FROM category_commitments cc
+                JOIN categories c ON cc.category_id = c.category_id
+                WHERE cc.commitment_id = ? AND cc.user_id = ?
+            """, (commitment_id, self.user_id))
+            
+            if not commitment:
+                logger.error(f"Commitment {commitment_id} not found for Pay Now")
+                return
+            
+            # Extract commitment details
+            try:
+                category_id = commitment['category_id']
+                category_name = commitment['category_name']
+                amount = float(commitment['amount'])
+            except (KeyError, TypeError, ValueError) as e:
+                logger.error(f"Error extracting commitment details: {e}")
+                return
+            
+            # Navigate to transactions tab and show transaction form
+            if hasattr(self, 'page_transactions'):
+                self.show_transactions()
+                
+                # Switch to Transactions View (not Simulate Transactions)
+                if hasattr(self.page_transactions, 'show_transaction_form'):
+                    self.page_transactions.show_transaction_form()
+                
+                # CRITICAL: Set pending_commitment_id so save_txn knows to mark commitment as paid
+                self.page_transactions.pending_commitment_id = commitment_id
+                
+                # Pre-fill transaction form with commitment details
+                self.page_transactions.amount_input.setText(str(amount))
+                self.page_transactions.type_input.setCurrentText("expense")
+                self.page_transactions.note_input.setPlainText(category_name)
+                
+                # Set category
+                cat_index = self.page_transactions.cat_input.findData(category_id)
+                if cat_index >= 0:
+                    self.page_transactions.cat_input.setCurrentIndex(cat_index)
+                
+                # Get accounts for pre-filling account field
+                accounts = fetch_all("""
+                    SELECT id, account_id, bank_name, account_type 
+                    FROM accounts 
+                    WHERE user_id = ? AND (account_type = 'salary' OR account_type = 'checking')
+                    LIMIT 1
+                """, (self.user_id,))
+                
+                if accounts:
+                    account_id = accounts[0]['id']
+                    acc_index = self.page_transactions.acc_input.findData(account_id)
+                    if acc_index >= 0:
+                        self.page_transactions.acc_input.setCurrentIndex(acc_index)
+        except Exception as e:
+            logger.error(f"Error handling payment sheet pay now: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _handle_payment_sheet_mark_paid(self, commitment_id):
+        """Handle Mark as Paid from payment action sheet"""
+        try:
+            from core.commitment_manager import mark_commitment_paid_manually
+            
+            # Mark as paid via backend
+            success = mark_commitment_paid_manually(self.user_id, commitment_id)
+            
+            if success:
+                # Recompute notifications - this will clear the notification for this commitment
+                # since _compute_all_notifications skips paid commitments
+                if hasattr(self, 'notification_manager'):
+                    self.notification_manager.recompute()
+                
+                # Update badge count
+                if hasattr(self, 'nav_bar') and hasattr(self.nav_bar, 'notification_badge'):
+                    self.nav_bar.notification_badge.update_count(self.notification_manager.get_unread_count())
+                
+                # Refresh notification panel to reflect cleared notification
+                if hasattr(self, 'notification_panel'):
+                    self.notification_panel.refresh_notifications()
+                
+                # Refresh commitment tracker to show updated paid status
+                if hasattr(self, 'commitment_tracker') and self.commitment_tracker:
+                    self.commitment_tracker.load_commitments()
+                
+                # Refresh dashboard metrics to update balance
+                if hasattr(self, 'refresh_metrics_cards_main'):
+                    self.refresh_metrics_cards_main()
+        except Exception as e:
+            logger.error(f"Error handling payment sheet mark paid: {e}")
+    
+    def _handle_payment_sheet_smart_detect(self, commitment_id):
+        """Handle Smart Detect from payment action sheet"""
+        from database.db_manager import fetch_one
+        commitment = fetch_one("""
+            SELECT c.category_name
+            FROM category_commitments cc
+            JOIN categories c ON cc.category_id = c.category_id
+            WHERE cc.commitment_id = ? AND cc.user_id = ?
+        """, (commitment_id, self.user_id))
+        if commitment:
+            # Handle sqlite3.Row object - convert to dict or use bracket notation
+            try:
+                category_name = commitment['category_name'] if 'category_name' in commitment.keys() else 'Commitment'
+            except (KeyError, TypeError):
+                category_name = 'Commitment'
+            if hasattr(self, 'commitment_tracker') and self.commitment_tracker:
+                self.commitment_tracker.trigger_smart_detect(commitment_id, category_name)
+    
+    def _handle_notification_delete(self, commitment_id):
+        """Handle delete notification request - mark commitment as paid to remove notification"""
+        try:
+            from core.commitment_manager import mark_commitment_paid_manually
+            
+            # Mark commitment as paid (this will cause notification to disappear on recompute)
+            success = mark_commitment_paid_manually(self.user_id, commitment_id)
+            
+            if success:
+                # Update notification manager
+                if hasattr(self, 'notification_manager'):
+                    self.notification_manager.recompute()
+                
+                # Update badge if available
+                if hasattr(self, 'nav_bar') and hasattr(self.nav_bar, 'notification_badge'):
+                    self.nav_bar.notification_badge.update_count(self.notification_manager.get_unread_count())
+        except Exception as e:
+            logger.error(f"Error handling notification delete: {e}")
+    
+    def show_notifications(self):
+        """Show notifications panel with latest data"""
+        if hasattr(self, 'notification_manager'):
+            # Ensure notification data is current
+            self.notification_manager.recompute()
+            
+            from ui.notification_panel import NotificationPanel
+            if not hasattr(self, 'notification_panel'):
+                self.notification_panel = NotificationPanel(self.notification_manager, self)
+                # Connect signals to handle actions
+                self.notification_panel.mark_paid_requested.connect(self._handle_notification_mark_paid)
+                self.notification_panel.manage_payment_requested.connect(self._handle_notification_manage_payment)
+                self.notification_panel.notification_deleted.connect(self._handle_notification_delete)
+            else:
+                # Refresh existing panel data
+                self.notification_panel.refresh_notifications()
+            
+            self.notification_panel.show()
+            self.notification_panel.raise_()
+            self.notification_panel.activateWindow()
+
     def show_settings(self):
         """Show settings view"""
         self.stack.setCurrentWidget(self.page_settings)
@@ -4354,6 +4737,10 @@ class DashboardMain(QMainWindow):
             "Link Bank": self.show_link_bank
         }
         self.nav_bar = ModernNavigationBar(self, self.logout, nav_callbacks)
+        
+        # Set up notification manager for badge after nav_bar is created
+        if hasattr(self, 'notification_manager'):
+            self.nav_bar.setup_notification_manager(self.notification_manager)
 
     def setup_ui(self):
         """Setup main content area with sidebar layout"""

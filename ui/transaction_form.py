@@ -422,6 +422,18 @@ class TransactionForm(QWidget):
                             self.parent_dashboard.refresh_metrics_cards_main()
                         if hasattr(self.parent_dashboard, 'metrics_carousel'):
                             self.parent_dashboard.metrics_carousel.refresh_metrics_cards()
+                        
+                        # Recompute notifications to clear notification for this paid commitment
+                        if hasattr(self.parent_dashboard, 'notification_manager'):
+                            self.parent_dashboard.notification_manager.recompute()
+                            # Update badge count
+                            if hasattr(self.parent_dashboard, 'nav_bar') and hasattr(self.parent_dashboard.nav_bar, 'notification_badge'):
+                                self.parent_dashboard.nav_bar.notification_badge.update_count(
+                                    self.parent_dashboard.notification_manager.get_unread_count()
+                                )
+                            # Refresh notification panel if it exists
+                            if hasattr(self.parent_dashboard, 'notification_panel'):
+                                self.parent_dashboard.notification_panel.refresh_notifications()
                 # Priority 2: Try automatic matching if no explicit commitment
                 elif cat_id:
                     from core.transactions import try_mark_commitment_for_txn
