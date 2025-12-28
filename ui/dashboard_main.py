@@ -2872,10 +2872,10 @@ class DashboardMain(QMainWindow):
             except (KeyError, TypeError, AttributeError):
                 currency = "USD"
 
-            # Check if accounts exist
+            # Check if accounts exist (relaxed: check by is_primary OR account_type)
             has_savings_account = fetch_one("""
                 SELECT account_id FROM accounts 
-                WHERE user_id = ? AND account_type = 'savings' AND is_primary = 1
+                WHERE user_id = ? AND (account_type = 'savings' OR is_primary = 1)
                 LIMIT 1
             """, (self.user_id,))
             
@@ -3394,7 +3394,7 @@ class DashboardMain(QMainWindow):
                        is_primary, plaid_token
                 FROM accounts 
                 WHERE user_id = ? AND plaid_token IS NOT NULL
-                AND (account_type = 'salary' OR (account_type = 'savings' AND is_primary = 1))
+                AND (account_type = 'salary' OR account_type = 'savings' OR is_primary = 1)
                 ORDER BY 
                     CASE WHEN account_type = 'salary' AND is_primary = 1 THEN 1
                          WHEN account_type = 'savings' AND is_primary = 1 THEN 2
@@ -3417,7 +3417,7 @@ class DashboardMain(QMainWindow):
         
         active_savings = fetch_one("""
             SELECT account_id FROM accounts 
-            WHERE user_id = ? AND account_type = 'savings' AND is_primary = 1
+            WHERE user_id = ? AND (account_type = 'savings' OR is_primary = 1)
             LIMIT 1
         """, (self.user_id,))
         
@@ -3855,34 +3855,38 @@ class DashboardMain(QMainWindow):
                 QMessageBox.warning(self, "Error", "Account not found")
                 return
             
+            # Handle sqlite3.Row object - convert to dict or use bracket notation
+            try:
+                if hasattr(account, 'keys'):
+                    account_type = account['account_type'] if 'account_type' in account.keys() else None
+                    plaid_token = account['plaid_token'] if 'plaid_token' in account.keys() else None
+                else:
+                    account_type = account.get("account_type") if hasattr(account, 'get') else None
+                    plaid_token = account.get("plaid_token") if hasattr(account, 'get') else None
+            except (KeyError, TypeError, AttributeError):
+                account_type = None
+                plaid_token = None
+            
             # #region agent log
             try:
                 with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                    f.write(_json.dumps({"sessionId":"debug-session","runId":"accounts-pre-fix","hypothesisId":"H2","location":"dashboard_main.py:set_as_savings_account","message":"account found before update","data":{"account_id":account_id,"current_type":account.get("account_type",""),"has_plaid_token":bool(account.get("plaid_token"))}, "timestamp":int(_time.time()*1000)}) + "\n")
+                    f.write(_json.dumps({"sessionId":"debug-session","runId":"accounts-pre-fix","hypothesisId":"H2","location":"dashboard_main.py:set_as_savings_account","message":"account found before update","data":{"account_id":account_id,"current_type":account_type,"has_plaid_token":bool(plaid_token)}, "timestamp":int(_time.time()*1000)}) + "\n")
             except Exception:
                 pass
             # #endregion
             
-            # CRITICAL: Only allow setting as savings if account is already savings type from Plaid
-            # Do NOT convert checking accounts to savings (that would remove checking account)
-            if account.get("account_type") != "savings":
-                QMessageBox.warning(self, "Error", 
-                    f"This account is a {account.get('account_type', 'checking')} account. "
-                    "Only savings accounts from Plaid can be set as savings. "
-                    "Please link a savings account through Plaid.")
-                return
-            
-            # First, unset all primary savings accounts
+            # RELAXED: Allow any account to be set as savings (minimal validation)
+            # Unset all primary savings accounts (by is_primary flag, not account_type)
             execute_query("""
                 UPDATE accounts 
                 SET is_primary = 0 
-                WHERE user_id = ? AND account_type = 'savings'
+                WHERE user_id = ? AND is_primary = 1 AND account_type = 'savings'
             """, (self.user_id,), commit=False)
             
-            # Set this account as primary (it's already savings type from Plaid)
+            # Set this account as primary savings (update both is_primary and account_type for display)
             execute_query("""
                 UPDATE accounts 
-                SET is_primary = 1
+                SET is_primary = 1, account_type = 'savings'
                 WHERE account_id = ? AND user_id = ?
             """, (account_id, self.user_id), commit=True)
             
