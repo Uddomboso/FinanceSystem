@@ -5,6 +5,7 @@ Updated AI suggestions using the enhanced EnnyBrain service
 import os
 import requests
 from PyQt5.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PyQt5.QtCore import QEvent
 from core.config import Config
 from core.logger import logger
 from ai.penny_brain import penny_brain
@@ -194,11 +195,26 @@ class AiSuggestionWidget(QWidget):
         self.logger = logger
 
         self.label = QLabel("Penny is thinking... 🤔")
+        # Apply theme-aware text color
+        self._update_text_color()
         layout = QVBoxLayout()
         layout.addWidget(self.label)
         self.setLayout(layout)
 
         self.get_ai_suggestion()
+    
+    def _update_text_color(self):
+        """Update label text color based on current theme"""
+        from core.theme_manager import theme_manager
+        from assets.styles.penny_colors import PennyColors
+        p = PennyColors.get_palette(theme_manager.current_theme)
+        self.label.setStyleSheet(f"color: {p['text_primary']}; font-size: 14px;")
+    
+    def changeEvent(self, event):
+        """Update text color when theme changes"""
+        if event.type() == QEvent.PaletteChange:
+            self._update_text_color()
+        super().changeEvent(event)
 
     def get_ai_suggestion(self):
         try:

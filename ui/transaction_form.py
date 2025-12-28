@@ -108,6 +108,8 @@ class TransactionForm(QWidget):
         self.load_accs()
 
     def show_transaction_form(self):
+        # Refresh accounts before showing to ensure latest data is available
+        self.load_accs()
         self.stack_layout.removeWidget(self.categories_view)
         self.categories_view.setVisible(False)
         self.stack_layout.addWidget(self.transactions_view)
@@ -139,6 +141,22 @@ class TransactionForm(QWidget):
             display_name = f"{bank_name} ({account_type})"
             # Store the database 'id' (INTEGER) for foreign key, not Plaid 'account_id' (TEXT)
             self.acc_input.addItem(display_name, r["id"])
+        
+        # Auto-select default account when only one exists
+        if self.acc_input.count() == 1:
+            self.acc_input.setCurrentIndex(0)
+        elif self.acc_input.count() > 1:
+            # If multiple accounts exist, prefer primary checking account
+            primary_account = fetch_one("""
+                SELECT id FROM accounts 
+                WHERE user_id = ? AND account_type = 'salary' AND is_primary = 1
+                LIMIT 1
+            """, (self.user_id,))
+            if primary_account:
+                primary_id = primary_account["id"]
+                primary_index = self.acc_input.findData(primary_id)
+                if primary_index >= 0:
+                    self.acc_input.setCurrentIndex(primary_index)
     
     def prefill_savings_transaction(self, amount, from_account_id, to_account_number, category_id, to_account_name=None):
         """Pre-fill the transaction form for a savings payment"""
@@ -698,16 +716,20 @@ class TransactionForm(QWidget):
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
         
-        # Account selection
-        account_label = QLabel("Select Account:")
+        # Account selection (optional for simulated transactions)
+        account_label = QLabel("Select Account (Optional):")
         account_label.setStyleSheet(f"color: {PennyColors.TEXT_PRIMARY}; font-weight: 600; margin-top: 10px;")
         layout.addWidget(account_label)
+        
+        account_info_label = QLabel("Note: Simulated transactions work without an account")
+        account_info_label.setStyleSheet(f"color: {PennyColors.TEXT_SECONDARY}; font-size: 11px; font-style: italic;")
+        layout.addWidget(account_info_label)
         
         self.sim_account_input = QComboBox()
         self.sim_account_input.setFixedHeight(40)
         layout.addWidget(self.sim_account_input)
         
-        # Load accounts
+        # Load accounts (optional - transactions work without them)
         self.load_sim_accounts()
         
         # Custom transaction section
@@ -809,7 +831,7 @@ class TransactionForm(QWidget):
     
     
     def simulate_custom_transaction(self):
-        """Simulate a custom transaction"""
+        """Simulate a custom transaction without requiring an account"""
         merchant_name = self.sim_merchant_input.text().strip()
         if not merchant_name:
             QMessageBox.warning(self, "Missing Name", "Please enter a merchant name")
@@ -823,43 +845,31 @@ class TransactionForm(QWidget):
             QMessageBox.warning(self, "Invalid Amount", "Please enter a valid amount greater than 0")
             return
         
-        # Get selected account
-        account_data = self.sim_account_input.currentData()
-        if not account_data:
-            QMessageBox.warning(self, "No Account", "Please select an account first")
-            return
-        
-        account_id, plaid_token, plaid_account_id = account_data
-        
         # Generate reference number
         ref_number = self.generate_reference_number()
         
         # Create transaction name with reference
         transaction_name = f"{merchant_name} - {ref_number}"
         
-        self.process_simulation(account_id, plaid_account_id, transaction_name, amount, ref_number)
+        self.process_simulation(transaction_name, amount, ref_number)
         
         # Clear inputs
         self.sim_merchant_input.clear()
         self.sim_amount_input.clear()
     
-    def process_simulation(self, account_id, plaid_account_id, transaction_name, amount, ref_number):
-        """Process the transaction simulation using Plaid"""
+    def process_simulation(self, transaction_name, amount, ref_number):
+        """Process the transaction simulation without requiring an account"""
         try:
-            from core.transactions import insert_plaid_transaction
+            from core.transactions import insert_simulated_transaction
             from datetime import datetime
             
-            # Create transaction object (mimicking Plaid transaction format)
-            txn = {
-                "account_id": plaid_account_id or str(account_id),  # Use Plaid account_id if available
-                "amount": float(amount),
-                "date": datetime.now().date().isoformat(),
-                "name": transaction_name,
-                "merchant_name": transaction_name.split(" - ")[0]  # Extract merchant name
-            }
-            
-            # Insert transaction using Plaid transaction insertion (which handles Smart Detect)
-            inserted_id = insert_plaid_transaction(self.user_id, account_id, txn)
+            # Insert simulated transaction (no account required)
+            inserted_id = insert_simulated_transaction(
+                self.user_id,
+                transaction_name,
+                float(amount),
+                datetime.now().date().isoformat()
+            )
             
             if inserted_id:
                 # Show success message

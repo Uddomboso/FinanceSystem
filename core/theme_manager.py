@@ -2,10 +2,22 @@
 Theme management for PennyWise - styles built from a single palette source.
 """
 
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication, QProxyStyle, QStyle
+from PyQt5.QtCore import Qt
 
 from core.logger import logger
 from assets.styles.penny_colors import PennyColors
+
+
+class NoFocusRectStyle(QProxyStyle):
+    """Custom style that removes focus rectangles for mouse clicks while keeping keyboard focus"""
+    
+    def drawPrimitive(self, element, option, painter, widget=None):
+        """Override to skip drawing focus rectangles"""
+        if element == QStyle.PE_FrameFocusRect:
+            # Skip drawing focus rectangles
+            return
+        super().drawPrimitive(element, option, painter, widget)
 
 # Module-level active theme (kept in sync with ThemeManager instance)
 current_theme = "light"
@@ -62,6 +74,12 @@ class ThemeManager:
 
         self.current_theme = theme_name
         self._sync_global_theme()
+        
+        # Apply custom style to remove focus rectangles
+        if not hasattr(target_app, '_pennywise_style_applied'):
+            target_app.setStyle(NoFocusRectStyle())
+            target_app._pennywise_style_applied = True
+        
         target_app.setStyleSheet(self.stylesheets[theme_name])
         # Ensure queued updates flush so widgets repaint without restart
         try:
@@ -87,7 +105,7 @@ class ThemeManager:
             font-family: 'Segoe UI', system-ui, sans-serif;
         }}
 
-        /* Cards */
+        /* Cards - Remove focus rectangles */
         QFrame.card, QGroupBox {{
             background: {p['surface']};
             border: 1px solid {p['border']};
@@ -96,6 +114,10 @@ class ThemeManager:
         }}
         QFrame.card:hover {{
             border-color: {p['accent']};
+        }}
+        QFrame.card:focus, QGroupBox:focus {{
+            background: {p['surface']};
+            border: 1px solid {p['border']};
         }}
 
         /* Text */
@@ -106,7 +128,7 @@ class ThemeManager:
             color: {p['text_secondary']};
         }}
 
-        /* Buttons */
+        /* Buttons - Remove focus rectangles by making focus state identical to normal */
         QPushButton.primary {{
             background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {p['primary']}, stop:1 {p['accent']});
             color: white;
@@ -115,6 +137,10 @@ class ThemeManager:
         }}
         QPushButton.primary:hover {{
             background: {p['accent']};
+        }}
+        QPushButton.primary:focus {{
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {p['primary']}, stop:1 {p['accent']});
+            border: none;
         }}
         QPushButton {{
             background: {p['surface']};
@@ -126,6 +152,10 @@ class ThemeManager:
         QPushButton:hover {{
             background: {p['surface_alt']};
             border-color: {p['accent']};
+        }}
+        QPushButton:focus {{
+            background: {p['surface']};
+            border: 1px solid {p['border']};
         }}
         QPushButton:checked {{
             background: {p['accent']};
@@ -195,7 +225,7 @@ class ThemeManager:
             border-radius: 10px;
         }}
 
-        /* Navigation */
+        /* Navigation - Remove focus rectangles */
         QPushButton.nav-item {{
             background: transparent;
             color: {p['text_secondary']};
@@ -208,6 +238,29 @@ class ThemeManager:
         QPushButton.nav-item:hover {{
             background: {p.get('row_hover', p['accent'])};
             color: {p['primary']};
+        }}
+        QPushButton.nav-item:focus {{
+            background: transparent;
+            border: none;
+        }}
+        
+        /* Tabs - Remove focus rectangles */
+        QTabBar::tab {{
+            border: none;
+        }}
+        QTabBar::tab:focus {{
+            border: none;
+        }}
+        
+        /* Remove focus rectangles for other clickable widgets */
+        QAbstractButton:focus {{
+            border: inherit;
+        }}
+        QFrame:focus {{
+            border: inherit;
+        }}
+        QLabel:focus {{
+            border: none;
         }}
 
         /* Scrollbars */

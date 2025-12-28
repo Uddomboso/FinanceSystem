@@ -337,6 +337,9 @@ class SavingsForm(QDialog):
             if self.parent_dashboard:
                 if hasattr(self.parent_dashboard, 'refresh_dashboard'):
                     self.parent_dashboard.refresh_dashboard()
+                # Trigger notification recompute after commitment creation/update
+                if hasattr(self.parent_dashboard, 'notification_manager'):
+                    self.parent_dashboard.notification_manager.recompute()
             
             self.accept()
             

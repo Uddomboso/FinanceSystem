@@ -645,6 +645,9 @@ class CommitmentForm(QDialog):
                         if hasattr(self.parent_dashboard, 'rebuild_overview_cards'):
                             self.parent_dashboard.rebuild_overview_cards()
                         self.parent_dashboard.refresh_dashboard()
+                        # Trigger notification recompute after database save completes
+                        if hasattr(self.parent_dashboard, 'notification_manager'):
+                            self.parent_dashboard.notification_manager.recompute()
                 except Exception as e:
                     print(f"Error saving commitment background: {e}")
                     import traceback
@@ -660,8 +663,7 @@ class CommitmentForm(QDialog):
                 self.load_commitments()
                 self.trigger_dashboard_refresh()
                 self.commitments_changed.emit()
-                # Emit signal for notification manager
-                self.commitment_created.emit()
+                # Note: notification recompute happens in save_commitment_background after DB save completes
             
             # Show success dialog (non-blocking)
             self.show_commitment_created_dialog(name, amount, due_day, detection_method)

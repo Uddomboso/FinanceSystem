@@ -3,12 +3,13 @@ Penny Companion Widget - The heart and soul of PennyWise
 """
 
 from PyQt5.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel, QPushButton
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QEvent
 from PyQt5.QtGui import QFont, QPixmap
 from PyQt5.QtCore import QRect, QSize
 
 from .penny_avatar import PennyAvatar
 from assets.styles.penny_colors import PennyColors
+from core.theme_manager import theme_manager
 
 
 class PennyWidget(QFrame):
@@ -54,8 +55,16 @@ class PennyWidget(QFrame):
         
         self.message_label = QLabel("💭 Penny is thinking...")
         self.message_label.setWordWrap(True)
-        self.message_label.setStyleSheet("color: #1F2937; font-size: 14px; line-height: 1.4;")
+        # Apply theme-aware text color
+        self._update_text_color()
         self.message_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    
+    def _update_text_color(self):
+        """Update message label text color based on current theme"""
+        from core.theme_manager import theme_manager
+        from assets.styles.penny_colors import PennyColors
+        p = PennyColors.get_palette(theme_manager.current_theme)
+        self.message_label.setStyleSheet(f"color: {p['text_primary']}; font-size: 14px; line-height: 1.4;")
         
         bubble_layout.addWidget(self.message_label)
         
@@ -236,3 +245,9 @@ class PennyWidget(QFrame):
         """Clear message history"""
         self.message_history.clear()
         self.update_message("💭 Hello! I'm Penny, your financial companion.", "friendly")
+    
+    def changeEvent(self, event):
+        """Update text color when theme changes"""
+        if event.type() == QEvent.PaletteChange:
+            self._update_text_color()
+        super().changeEvent(event)

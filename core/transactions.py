@@ -366,3 +366,70 @@ def auto_match_category(user_id, merchant_name):
             return get_or_create_category(user_id, category_name)
     return None
 
+def insert_simulated_transaction(user_id, merchant_name, amount, date_str=None):
+    """
+    Insert a simulated transaction without requiring an account.
+    For demo/developer use only.
+    
+    Args:
+        user_id: User ID
+        merchant_name: Transaction description/merchant name
+        amount: Transaction amount (positive for expenses)
+        date_str: Optional date string (defaults to today)
+    
+    Returns:
+        transaction_id if successful, None otherwise
+    """
+    if date_str is None:
+        date_str = datetime.now().date().isoformat()
+    
+    amount = float(amount)
+    
+    # Check if transaction already exists (avoid duplicates)
+    existing = fetch_one("""
+        SELECT transaction_id FROM transactions
+        WHERE user_id = ? AND account_id IS NULL AND amount = ? AND description = ? AND date = ?
+    """, (user_id, amount, merchant_name, date_str))
+    if existing:
+        return existing["transaction_id"]
+    
+    # Try to auto-match merchant to category
+    category_id = auto_match_category(user_id, merchant_name)
+    
+    # Determine transaction type (expense if positive amount)
+    txn_type = "expense" if amount > 0 else "income"
+    
+    # Insert transaction with NULL account_id (simulated transactions don't need accounts)
+    execute_query("""
+        INSERT INTO transactions (
+            user_id, account_id, category_id, amount,
+            description, date, transaction_type
+        ) VALUES (?, NULL, ?, ?, ?, ?, ?)
+    """, (user_id, category_id, amount, merchant_name, date_str, txn_type), commit=True)
+    
+    # Fetch inserted id
+    inserted = fetch_one("""
+        SELECT transaction_id FROM transactions
+        WHERE user_id = ? AND account_id IS NULL AND amount = ? AND description = ? AND date = ?
+        ORDER BY transaction_id DESC LIMIT 1
+    """, (user_id, amount, merchant_name, date_str))
+    
+    # Try to mark related commitment (commitment matching doesn't require account_id)
+    try:
+        matched = False
+        # First try matching by category_id if we have one
+        if category_id:
+            # Use NULL for account_id in commitment matching
+            matched = try_mark_commitment_for_txn(user_id, None, category_id, amount, merchant_name, date_str)
+        
+        # If no match by category_id, try Smart Detect by transaction name
+        if not matched:
+            matched = smart_detect_commitment_by_name(user_id, merchant_name, amount)
+        
+        if matched:
+            print(f"✅ Commitment matched for {merchant_name}")
+    except Exception as e:
+        print(f"Commitment match error: {e}")
+    
+    return inserted["transaction_id"] if inserted else None
+

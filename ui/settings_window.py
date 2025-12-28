@@ -272,7 +272,6 @@ class SettingsWindow(QWidget):
         self._nav_items = [
             ("account", "Account Information", "fa5s.user"),
             ("appearance", "Appearance", "fa5s.palette"),
-            ("advanced", "Advanced", "fa5s.cogs"),
         ]
         sidebar = self.build_sidebar()
         split_layout.addWidget(sidebar)
@@ -359,7 +358,6 @@ class SettingsWindow(QWidget):
         builders = {
             "appearance": self.setup_appearance_section,
             "account": self.setup_account_section,
-            "advanced": self.setup_advanced_section,
         }
         for key, _, _ in self._nav_items:
             builder = builders.get(key)

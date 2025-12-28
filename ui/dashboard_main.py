@@ -352,10 +352,10 @@ class MetricsCarousel(QWidget):
                 LIMIT 1
             """, (self.user_id,))
             
-            # Check if savings account exists
+            # Check if savings account exists (any savings account, not just primary)
             savings_account = fetch_one("""
                 SELECT account_id FROM accounts 
-                WHERE user_id = ? AND account_type = 'savings' AND is_primary = 1
+                WHERE user_id = ? AND account_type = 'savings' AND plaid_token IS NOT NULL
                 LIMIT 1
             """, (self.user_id,))
             
@@ -387,30 +387,29 @@ class MetricsCarousel(QWidget):
                     except Exception as e:
                         logger.error(f"Error fetching checking balance: {e}")
 
-            # Get savings balance - ONLY the primary savings account
+            # Get savings balance - ONLY from Plaid, sum all savings accounts
             savings = 0
             if has_savings_account:
-                savings_account_data = fetch_one("""
+                savings_accounts = fetch_all("""
                     SELECT account_id, plaid_token
                     FROM accounts 
                     WHERE user_id = ? 
-                    AND account_type = 'savings' AND is_primary = 1
+                    AND account_type = 'savings'
                     AND plaid_token IS NOT NULL
-                    LIMIT 1
                 """,(self.user_id,))
                 
-                if savings_account_data:
+                if savings_accounts:
                     from core.plaid_api import get_account_balances
-                    try:
-                        balances_data = get_account_balances(savings_account_data["plaid_token"])
-                        if "error" not in balances_data:
-                            for acc_balance in balances_data.get("accounts",[]):
-                                if acc_balance["account_id"] == savings_account_data["account_id"]:
-                                    balance = acc_balance["balances"].get("available",0) or 0
-                                    savings = balance
-                                    break
-                    except Exception as e:
-                        logger.error(f"Error fetching savings balance: {e}")
+                    for savings_account_data in savings_accounts:
+                        try:
+                            balances_data = get_account_balances(savings_account_data["plaid_token"])
+                            if "error" not in balances_data:
+                                for acc_balance in balances_data.get("accounts",[]):
+                                    if acc_balance["account_id"] == savings_account_data["account_id"]:
+                                        balance = acc_balance["balances"].get("available",0) or 0
+                                        savings += balance
+                        except Exception as e:
+                            logger.error(f"Error fetching savings balance: {e}")
 
             # Get commitments (unpaid)
             commitments_row = fetch_one("""
@@ -632,7 +631,7 @@ class MetricsCarousel(QWidget):
                 checking_balance = checking_balance_row["balance"] if checking_balance_row and checking_balance_row[
                     "balance"] is not None else 0
 
-            # Get savings balance - first try Plaid savings accounts, then fallback to transaction-based
+            # Get savings balance - ONLY from Plaid, no fallback
             savings = 0
             plaid_savings_accounts = fetch_all("""
                 SELECT account_id, plaid_token, account_type, bank_name
@@ -643,7 +642,7 @@ class MetricsCarousel(QWidget):
             """,(self.user_id,))
             
             if plaid_savings_accounts:
-                # Get real savings balance from Plaid
+                # Get real savings balance from Plaid for all savings accounts
                 for account in plaid_savings_accounts:
                     try:
                         balances_data = get_account_balances(account["plaid_token"])
@@ -652,26 +651,10 @@ class MetricsCarousel(QWidget):
                             continue
                         for acc_balance in balances_data.get("accounts",[]):
                             if acc_balance["account_id"] == account["account_id"]:
-                                balance = acc_balance["balances"].get("available",0)
+                                balance = acc_balance["balances"].get("available",0) or 0
                                 savings += balance
                     except Exception as e:
                         logger.error(f"Error fetching savings balance for account {account['account_id']}: {e}")
-            
-            # If no Plaid savings accounts, use transaction-based calculation as fallback
-            # Count income transactions to savings accounts OR Savings category transactions
-            if not plaid_savings_accounts:
-                savings_row = fetch_one("""
-                    SELECT COALESCE(SUM(t.amount), 0) AS total
-                    FROM transactions t
-                    LEFT JOIN categories c ON t.category_id = c.category_id
-                    LEFT JOIN accounts a ON t.account_id = a.id
-                    WHERE t.user_id = ? 
-                    AND (
-                        (c.category_name = 'Savings' AND t.transaction_type = 'income')
-                        OR (a.account_type = 'savings' AND t.transaction_type = 'income')
-                    )
-                """,(self.user_id,))
-                savings = savings_row["total"] if savings_row and savings_row["total"] is not None else 0
 
             # Get commitments (unpaid) - handle NULL is_paid values
             commitments_row = fetch_one("""
@@ -1861,13 +1844,20 @@ class CommitmentTrackerWidget(QWidget):
             btn.setToolTip(f"{category_name}\n{amount_text}/month\nDue day {due_day}\nDetection: {detection_label}")
         
         # Apply styling after setting icon/text
+        # Use darker text in dark mode for better contrast on pastel backgrounds
+        from core.theme_manager import theme_manager
+        if theme_manager.current_theme == "dark":
+            text_color = "#0d1f26"  # Very dark teal-gray for high contrast on pastel circles
+        else:
+            text_color = theme_color('text_primary')
+        
         btn.setStyleSheet(f"""
             QPushButton {{
                 background: {pastel_bg};
-                color: {theme_color('text_primary')};
+                color: {text_color};
                 border: 3px solid {ring};
                 border-radius: 48px;
-                font-weight: 600;
+                font-weight: 700;
             }}
             QPushButton:hover {{
                 border: 4px solid {ring};
@@ -2063,6 +2053,9 @@ class CommitmentTrackerWidget(QWidget):
             self.load_commitments()
             # Refresh dashboard metrics to update price after commitments
             self.trigger_dashboard_refresh()
+            # Trigger notification recompute to update badge count
+            if self.parent_dashboard and hasattr(self.parent_dashboard, 'notification_manager'):
+                self.parent_dashboard.notification_manager.recompute()
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to unmark as paid: {str(e)}")
             import traceback
@@ -2096,14 +2089,9 @@ class CommitmentTrackerWidget(QWidget):
                     self.parent_dashboard.handle_commitment_delta(-amount)
                 # Refresh dashboard metrics to update available balance (safety net)
                 self.trigger_dashboard_refresh()
-                # Trigger commitment check to update notifications (after refresh)
-                from core.commitment_manager import check_commitments
-                check_commitments(self.user_id)
-                # Update notification manager
-                if hasattr(self, 'notification_manager'):
-                    self.notification_manager.recompute()
-                    if hasattr(self, 'nav_bar') and hasattr(self.nav_bar, 'notification_badge'):
-                        self.nav_bar.notification_badge.update_count(self.notification_manager.get_unread_count())
+                # Trigger notification recompute to update badge count
+                if self.parent_dashboard and hasattr(self.parent_dashboard, 'notification_manager'):
+                    self.parent_dashboard.notification_manager.recompute()
             else:
                 QMessageBox.warning(self,"Error","Failed to process payment")
         except Exception as e:
@@ -2650,9 +2638,8 @@ class CommitmentTrackerWidget(QWidget):
                 if hasattr(target_dashboard, 'rebuild_overview_cards'):
                     target_dashboard.rebuild_overview_cards()
             dlg.commitments_changed.connect(on_commitments_changed)
-        # Connect commitment creation signal for notification updates
-        if hasattr(dlg, 'commitment_created') and hasattr(target_dashboard, 'notification_manager'):
-            dlg.commitment_created.connect(lambda: target_dashboard.update_notification_badge())
+        # Note: Notification recompute is now handled directly in commitment save callback
+        # No need for signal connection as recompute happens after database save completes
 
         result = dlg.exec_()
         if result == QDialog.Accepted:
@@ -2716,6 +2703,32 @@ class DashboardMain(QMainWindow):
 
 
 
+    def refresh_all_state(self):
+        """Centralized method to refresh all app state after runtime changes (e.g., bank linking)"""
+        # Refresh accounts page
+        if hasattr(self, 'refresh_accounts_page'):
+            self.refresh_accounts_page()
+        
+        # Refresh transaction form accounts dropdown
+        if hasattr(self, 'page_transactions') and hasattr(self.page_transactions, 'load_accs'):
+            self.page_transactions.load_accs()
+        
+        # Refresh dashboard components
+        self.refresh_dashboard()
+        
+        # Refresh reports page
+        if hasattr(self, 'page_reports') and hasattr(self.page_reports, 'refresh'):
+            self.page_reports.refresh()
+        
+        # Always refresh recent transactions (not just when dashboard is visible)
+        if hasattr(self, 'recent_transactions_layout'):
+            self.refresh_recent_transactions()
+        
+        try:
+            logger.info("[dashboard] refresh_all_state completed")
+        except Exception:
+            pass
+
     def refresh_dashboard(self):
         """Refresh dashboard data including commitments and balance cards"""
         # Refresh commitments if they exist
@@ -2751,12 +2764,13 @@ class DashboardMain(QMainWindow):
             logger.error(f"Error updating notification badge: {e}")
 
     def update_notification_badge(self):
+        """Update notification badge by recomputing notifications and letting signal handle UI update"""
         if not hasattr(self, "notification_manager"):
             return
         if not hasattr(self, "nav_bar") or not hasattr(self.nav_bar, "notification_badge"):
             return
-        count = self.notification_manager.get_unread_count()
-        self.nav_bar.notification_badge.update_count(count)
+        # Recompute notifications to ensure latest state, which will emit notifications_changed signal
+        self.notification_manager.recompute()
     
     def refresh_metrics_cards_main(self):
         """Refresh the metrics cards in DashboardMain (not MetricsCarousel)"""
@@ -2826,18 +2840,18 @@ class DashboardMain(QMainWindow):
                         logger.error(f"Error fetching balance for account {account['account_id']}: {e}")
 
             # Get savings balance - ONLY from Plaid, no fallback
+            # Get ALL savings accounts (not just primary) to sum all savings balances
             savings = 0
             plaid_savings_accounts = fetch_all("""
                 SELECT account_id, plaid_token, account_type, bank_name
                 FROM accounts 
                 WHERE user_id = ? 
                 AND account_type = 'savings'
-                AND is_primary = 1
                 AND plaid_token IS NOT NULL
             """,(self.user_id,))
             
             if plaid_savings_accounts:
-                # Get real savings balance from Plaid
+                # Get real savings balance from Plaid for all savings accounts
                 for account in plaid_savings_accounts:
                     try:
                         balances_data = get_account_balances(account["plaid_token"])
@@ -2846,7 +2860,7 @@ class DashboardMain(QMainWindow):
                             continue
                         for acc_balance in balances_data.get("accounts",[]):
                             if acc_balance["account_id"] == account["account_id"]:
-                                balance = acc_balance["balances"].get("available",0)
+                                balance = acc_balance["balances"].get("available",0) or 0
                                 savings += balance
                     except Exception as e:
                         logger.error(f"Error fetching savings balance for account {account['account_id']}: {e}")
@@ -2901,13 +2915,13 @@ class DashboardMain(QMainWindow):
                     widget = self
                     while widget:
                         if hasattr(widget, 'show_link_bank'):
-                            widget.show_link_bank()
+                            widget.show_link_bank("savings")
                             return
                         widget = widget.parent() if hasattr(widget, 'parent') and callable(widget.parent) else None
                     from PyQt5.QtWidgets import QApplication
                     for widget in QApplication.topLevelWidgets():
                         if hasattr(widget, 'show_link_bank'):
-                            widget.show_link_bank()
+                            widget.show_link_bank("savings")
                             return
                 
                 savings_card = self.create_empty_card(
@@ -2941,13 +2955,13 @@ class DashboardMain(QMainWindow):
                     widget = self
                     while widget:
                         if hasattr(widget, 'show_link_bank'):
-                            widget.show_link_bank()
+                            widget.show_link_bank("listings")
                             return
                         widget = widget.parent() if hasattr(widget, 'parent') and callable(widget.parent) else None
                     from PyQt5.QtWidgets import QApplication
                     for widget in QApplication.topLevelWidgets():
                         if hasattr(widget, 'show_link_bank'):
-                            widget.show_link_bank()
+                            widget.show_link_bank("listings")
                             return
                 
                 available_card = self.create_empty_card(
@@ -3211,6 +3225,9 @@ class DashboardMain(QMainWindow):
         # Transactions page
         from ui.transaction_form import TransactionForm
         self.page_transactions = TransactionForm(self.user_id, parent=self)
+        # Connect transaction saved signal to refresh reports
+        if hasattr(self.page_transactions, 'transaction_saved'):
+            self.page_transactions.transaction_saved.connect(self._refresh_reports_on_transaction)
         
         # Accounts page
         self.page_accounts = self.build_accounts_page()
@@ -3224,20 +3241,18 @@ class DashboardMain(QMainWindow):
         self.page_settings = SettingsWindow(self.user_id, parent=self)
         self.page_settings.settings_changed.connect(self.on_settings_changed)
         
-        # Link Bank page
-        from ui.bank_connect_window import BankConnectWindow
-        self.page_bank = BankConnectWindow(self.user_id, self)
+        # Link Bank page (created fresh each time show_link_bank is called)
+        self.page_bank = None
         
         # Connect to commitment form signals for notification updates
         # We'll connect this when the commitment form is created dynamically
         
-        # Add all pages to stack
+        # Add all pages to stack (bank page added dynamically in show_link_bank)
         self.stack.addWidget(self.page_dashboard)
         self.stack.addWidget(self.page_transactions)
         self.stack.addWidget(self.page_accounts)
         self.stack.addWidget(self.page_reports)
         self.stack.addWidget(self.page_settings)
-        self.stack.addWidget(self.page_bank)
         
         # Set dashboard as default
         self.stack.setCurrentWidget(self.page_dashboard)
@@ -3371,18 +3386,18 @@ class DashboardMain(QMainWindow):
         scroll_layout.setContentsMargins(0, 0, 0, 0)
         scroll_layout.setSpacing(12)
         
-        # Get all accounts - only main plaid accounts (checking), exclude business/savings sub-accounts
-        # We only show accounts that are linked to pennywise (listings or savings)
+        # Get all accounts - include both checking (salary) and savings accounts
+        # We show all accounts that are linked to pennywise (listings or savings)
         try:
             accounts = fetch_all("""
                 SELECT id, account_id, bank_name, account_type, institution_name, institution_logo,
                        is_primary, plaid_token
                 FROM accounts 
                 WHERE user_id = ? AND plaid_token IS NOT NULL
-                AND (account_type = 'salary' OR (account_type = 'savings' AND is_primary = 1))
+                AND (account_type = 'salary' OR account_type = 'savings')
                 ORDER BY 
                     CASE WHEN account_type = 'salary' AND is_primary = 1 THEN 1
-                         WHEN account_type = 'savings' AND is_primary = 1 THEN 2
+                         WHEN account_type = 'savings' THEN 2
                          ELSE 3 END,
                     COALESCE(institution_name, bank_name)
             """, (self.user_id,))
@@ -3394,10 +3409,10 @@ class DashboardMain(QMainWindow):
                        is_primary, plaid_token
                 FROM accounts 
                 WHERE user_id = ? AND plaid_token IS NOT NULL
-                AND (account_type = 'salary' OR account_type = 'savings' OR is_primary = 1)
+                AND (account_type = 'salary' OR account_type = 'savings')
                 ORDER BY 
                     CASE WHEN account_type = 'salary' AND is_primary = 1 THEN 1
-                         WHEN account_type = 'savings' AND is_primary = 1 THEN 2
+                         WHEN account_type = 'savings' THEN 2
                          ELSE 3 END,
                     COALESCE(institution_name, bank_name)
             """, (self.user_id,))
@@ -3417,7 +3432,7 @@ class DashboardMain(QMainWindow):
         
         active_savings = fetch_one("""
             SELECT account_id FROM accounts 
-            WHERE user_id = ? AND (account_type = 'savings' OR is_primary = 1)
+            WHERE user_id = ? AND account_type = 'savings'
             LIMIT 1
         """, (self.user_id,))
         
@@ -3794,6 +3809,7 @@ class DashboardMain(QMainWindow):
             from database.migrations.add_institution_migration import apply_institution_migration
             apply_institution_migration()
             
+            # TASK 4: Accounts are read-only from Plaid - only update UI-level flags (is_primary)
             # First, unset all primary salary accounts
             execute_query("""
                 UPDATE accounts 
@@ -3801,12 +3817,23 @@ class DashboardMain(QMainWindow):
                 WHERE user_id = ? AND account_type = 'salary'
             """, (self.user_id,), commit=False)
             
-            # Set this account as primary and ensure it's salary type
+            # Set this account as primary (update is_primary and account_type for display)
+            # Note: account_type updated for UI, but Plaid data remains source of truth
             execute_query("""
                 UPDATE accounts 
                 SET is_primary = 1, account_type = 'salary'
                 WHERE account_id = ? AND user_id = ?
             """, (account_id, self.user_id), commit=True)
+            
+            # #region agent log
+            import json as _json
+            import time as _time
+            try:
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(_json.dumps({"sessionId":"debug-session","runId":"task4","hypothesisId":"T4","location":"dashboard_main.py:set_as_main_account","message":"updated UI flags only","data":{"account_id":account_id,"updated_is_primary":1,"note":"account_type updated for display, Plaid remains source of truth"}, "timestamp":int(_time.time()*1000)}) + "\n")
+            except Exception:
+                pass
+            # #endregion
             
             # Refresh dashboard
             self.refresh_dashboard()
@@ -3875,15 +3902,14 @@ class DashboardMain(QMainWindow):
                 pass
             # #endregion
             
-            # RELAXED: Allow any account to be set as savings (minimal validation)
-            # Unset all primary savings accounts (by is_primary flag, not account_type)
+            # Unset all primary savings accounts first
             execute_query("""
                 UPDATE accounts 
                 SET is_primary = 0 
                 WHERE user_id = ? AND is_primary = 1 AND account_type = 'savings'
             """, (self.user_id,), commit=False)
             
-            # Set this account as primary savings (update both is_primary and account_type for display)
+            # Set this account as savings account - update both account_type and is_primary
             execute_query("""
                 UPDATE accounts 
                 SET is_primary = 1, account_type = 'savings'
@@ -3893,23 +3919,32 @@ class DashboardMain(QMainWindow):
             # #region agent log
             try:
                 with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(_json.dumps({"sessionId":"debug-session","runId":"task4","hypothesisId":"T4","location":"dashboard_main.py:set_as_savings_account","message":"updated UI flags only","data":{"account_id":account_id,"updated_is_primary":1,"note":"account_type updated for display, Plaid remains source of truth"}, "timestamp":int(_time.time()*1000)}) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            
+            # #region agent log
+            try:
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
                     f.write(_json.dumps({"sessionId":"debug-session","runId":"accounts-pre-fix","hypothesisId":"H2","location":"dashboard_main.py:set_as_savings_account","message":"account updated (preserved type)","data":{"account_id":account_id,"preserved_type":"savings"}, "timestamp":int(_time.time()*1000)}) + "\n")
             except Exception:
                 pass
             # #endregion
             
-            # Refresh dashboard
+            # Refresh accounts page immediately to reflect the change
+            # This rebuilds the page with fresh data from database
+            self.refresh_accounts_page()
+            
+            # Refresh dashboard and metrics to show updated savings balance
             self.refresh_dashboard()
             self.refresh_metrics_cards_main()
             if hasattr(self, 'metrics_carousel'):
                 self.metrics_carousel.refresh_metrics_cards()
-            # Also refresh the DashboardMain metrics cards
-            if hasattr(self, 'setup_metrics_carousel'):
-                # Force refresh by calling show_dashboard which rebuilds the page
-                QTimer.singleShot(200, lambda: self.show_dashboard())
             
-            # Refresh accounts page
-            QTimer.singleShot(100, self.refresh_accounts_page)
+            # If user is currently viewing accounts page, ensure it's shown with updated data
+            if hasattr(self, 'stack') and self.stack.currentWidget() == self.page_accounts:
+                self.stack.setCurrentWidget(self.page_accounts)
             
             QMessageBox.information(self, "Success", "Savings account updated!")
             
@@ -3929,6 +3964,18 @@ class DashboardMain(QMainWindow):
         
         if reply == QMessageBox.Yes:
             try:
+                # TASK 4: Accounts are read-only from Plaid - removal is allowed for UI cleanup
+                # but account will be re-added if Plaid connection is refreshed
+                # #region agent log
+                import json as _json
+                import time as _time
+                try:
+                    with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                        f.write(_json.dumps({"sessionId":"debug-session","runId":"task4","hypothesisId":"T4","location":"dashboard_main.py:remove_account","message":"removing account (will be re-added from Plaid on refresh)","data":{"account_id":account_id,"note":"account is read-only from Plaid, removal is temporary"}, "timestamp":int(_time.time()*1000)}) + "\n")
+                except Exception:
+                    pass
+                # #endregion
+                
                 execute_query("""
                     DELETE FROM accounts 
                     WHERE account_id = ? AND user_id = ?
@@ -4238,22 +4285,16 @@ class DashboardMain(QMainWindow):
 
     def refresh_accounts_page(self):
         """Refresh the accounts page by rebuilding it"""
-        print(f"[DEBUG] refresh_accounts_page called for user_id: {self.user_id}")
         if not hasattr(self, 'stack') or not hasattr(self, 'page_accounts'):
-            print("[DEBUG] Missing stack or page_accounts - cannot refresh")
             return
         
         # Find the index of the accounts page in the stack
         accounts_index = self.stack.indexOf(self.page_accounts)
         if accounts_index == -1:
-            print("[DEBUG] Accounts page not found in stack")
             return
-        
-        print(f"[DEBUG] Found accounts page at index {accounts_index}, rebuilding...")
         
         # Check if we're currently viewing the accounts page
         was_viewing_accounts = self.stack.currentWidget() == self.page_accounts
-        print(f"[DEBUG] Currently viewing accounts page: {was_viewing_accounts}")
         
         # Remove the old accounts page from the stack
         old_page = self.stack.widget(accounts_index)
@@ -4262,20 +4303,14 @@ class DashboardMain(QMainWindow):
             old_page.deleteLater()
         
         # Build a new accounts page
-        print(f"[DEBUG] Building new accounts page for user_id: {self.user_id}")
         self.page_accounts = self.build_accounts_page()
         
         # Insert the new page at the same index
         self.stack.insertWidget(accounts_index, self.page_accounts)
-        print(f"[DEBUG] New accounts page inserted at index {accounts_index}")
         
         # If we were viewing the accounts page, show it again
         if was_viewing_accounts:
             self.stack.setCurrentWidget(self.page_accounts)
-            print("[DEBUG] Switched back to accounts page")
-        
-        # Force a refresh even if not currently viewing (so it's ready when user navigates to it)
-        print("[DEBUG] Accounts page refresh complete")
 
     def show_dashboard(self):
         """Show dashboard view"""
@@ -4288,20 +4323,29 @@ class DashboardMain(QMainWindow):
 
     def show_transactions(self):
         """Show transactions view"""
+        # Refresh accounts dropdown to ensure latest data
+        if hasattr(self, 'page_transactions') and hasattr(self.page_transactions, 'load_accs'):
+            self.page_transactions.load_accs()
         self.stack.setCurrentWidget(self.page_transactions)
         self.highlight_nav("Transactions")
 
     def show_accounts(self):
         """Show accounts view"""
-        print(f"[DEBUG] show_accounts() called - refreshing accounts page for user {self.user_id}")
         # Refresh accounts page before showing to ensure latest data
         self.refresh_accounts_page()
         self.stack.setCurrentWidget(self.page_accounts)
         self.highlight_nav("Accounts")
-        print(f"[DEBUG] Accounts page displayed")
 
+    def _refresh_reports_on_transaction(self):
+        """Refresh reports page when a transaction is saved"""
+        if hasattr(self, 'page_reports') and hasattr(self.page_reports, 'refresh'):
+            self.page_reports.refresh()
+    
     def show_reports(self):
         """Show reports view"""
+        # Always refresh reports data when showing the page to ensure latest data
+        if hasattr(self, 'page_reports') and hasattr(self.page_reports, 'refresh'):
+            self.page_reports.refresh()
         self.stack.setCurrentWidget(self.page_reports)
         self.highlight_nav("Reports")
 
@@ -4559,8 +4603,25 @@ class DashboardMain(QMainWindow):
         self.stack.setCurrentWidget(self.page_settings)
         self.highlight_nav("Settings")
 
-    def show_link_bank(self):
-        """Show link bank view"""
+    def show_link_bank(self, account_type_intent=None):
+        """Show link bank view with fresh state"""
+        from ui.bank_connect_window import BankConnectWindow
+        
+        # Remove old bank page if it exists
+        if self.page_bank is not None:
+            bank_index = self.stack.indexOf(self.page_bank)
+            if bank_index >= 0:
+                self.stack.removeWidget(self.page_bank)
+                self.page_bank.deleteLater()
+        
+        # Create fresh bank connect window
+        self.page_bank = BankConnectWindow(self.user_id, self, account_type_intent=account_type_intent)
+        
+        # Add to stack if not already there
+        bank_index = self.stack.indexOf(self.page_bank)
+        if bank_index < 0:
+            self.stack.addWidget(self.page_bank)
+        
         self.stack.setCurrentWidget(self.page_bank)
         self.highlight_nav("Link Bank")
 
@@ -5608,6 +5669,11 @@ class DashboardMain(QMainWindow):
             # Always refresh recent transactions so inline styles update even if not on dashboard
             if hasattr(self, "recent_transactions_layout"):
                 self.refresh_recent_transactions()
+            # Update AI text colors in Penny widgets
+            if hasattr(self, "penny_widget") and hasattr(self.penny_widget, "_update_text_color"):
+                self.penny_widget._update_text_color()
+            if hasattr(self, "penny_companion") and hasattr(self.penny_companion, "_update_text_color"):
+                self.penny_companion._update_text_color()
         except Exception as e:
             logger.warning(f"[theme] apply_current_theme_styles failed: {e}")
         

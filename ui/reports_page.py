@@ -16,11 +16,11 @@ REPORT COMPUTATION RULES (Examiner-Proof):
 """
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
-    QPushButton, QButtonGroup
+    QPushButton, QButtonGroup, QFileDialog, QMessageBox
 )
 from PyQt5.QtCore import Qt, QEvent
 from PyQt5.QtGui import QFont
-from database.db_manager import fetch_all
+from database.db_manager import fetch_all, fetch_one
 from assets.styles.penny_colors import PennyColors
 from core import theme_manager
 import qtawesome as qta
@@ -131,6 +131,12 @@ class ReportsPage(QWidget):
             self.range_combo.addItem(label, value)
         self.range_combo.currentIndexChanged.connect(self.change_range_mode)
         header_layout.addWidget(self.range_combo)
+        
+        # Download PDF button
+        self.download_pdf_btn = QPushButton("Download Bank Statement (PDF)")
+        self.download_pdf_btn.setFont(QFont("Segoe UI", 11))
+        self.download_pdf_btn.clicked.connect(self.download_bank_statement)
+        header_layout.addWidget(self.download_pdf_btn)
         
         section_layout.addLayout(header_layout)
         
@@ -420,6 +426,154 @@ class ReportsPage(QWidget):
         self.chart_canvas = FigureCanvas(fig)
         layout = self.chart_container.layout()
         layout.addWidget(self.chart_canvas)
+    
+    def _get_current_date_range(self):
+        """Get the current date range based on range_mode"""
+        end_date = date.today()
+        if self.range_mode == "year":
+            start_date = date(end_date.year, 1, 1)
+        elif self.range_mode.startswith("month:"):
+            _, ym = self.range_mode.split(":")
+            year, month = map(int, ym.split("-"))
+            start_date = date(year, month, 1)
+            last_day = calendar.monthrange(year, month)[1]
+            end_date = date(year, month, last_day)
+        else:  # default 30d
+            start_date = end_date - timedelta(days=30)
+        return start_date, end_date
+    
+    def download_bank_statement(self):
+        """Generate and download bank statement as PDF"""
+        try:
+            # Get current date range
+            start_date, end_date = self._get_current_date_range()
+            
+            # Fetch transactions with categories for the date range
+            transactions = fetch_all("""
+                SELECT 
+                    t.date,
+                    t.description,
+                    t.amount,
+                    t.transaction_type,
+                    c.category_name
+                FROM transactions t
+                LEFT JOIN categories c ON t.category_id = c.category_id
+                WHERE t.user_id = ? 
+                  AND date(t.date) BETWEEN ? AND ?
+                  AND t.transaction_type IN ('income', 'expense')
+                ORDER BY t.date DESC, t.transaction_id DESC
+            """, (self.user_id, start_date.isoformat(), end_date.isoformat()))
+            
+            # Convert sqlite3.Row to dict
+            transactions_list = []
+            for txn in transactions:
+                transactions_list.append({
+                    'date': txn['date'] if 'date' in txn.keys() else None,
+                    'description': txn['description'] if 'description' in txn.keys() else 'N/A',
+                    'amount': float(txn['amount'] or 0) if 'amount' in txn.keys() else 0.0,
+                    'transaction_type': txn['transaction_type'] if 'transaction_type' in txn.keys() else 'expense',
+                    'category_name': txn['category_name'] if 'category_name' in txn.keys() else 'Uncategorized'
+                })
+            
+            # Fetch account balances from Plaid
+            checking_balance = 0.0
+            savings_balance = 0.0
+            checking_account_id = None
+            savings_account_id = None
+            
+            from core.plaid_api import get_account_balances
+            
+            # Get checking account balance
+            checking_account = fetch_one("""
+                SELECT account_id, plaid_token
+                FROM accounts 
+                WHERE user_id = ? 
+                AND account_type = 'salary' AND is_primary = 1
+                AND plaid_token IS NOT NULL
+                LIMIT 1
+            """, (self.user_id,))
+            
+            if checking_account:
+                checking_account_id = checking_account['account_id'] if 'account_id' in checking_account.keys() else None
+                try:
+                    balances_data = get_account_balances(checking_account['plaid_token'] if 'plaid_token' in checking_account.keys() else None)
+                    if "error" not in balances_data:
+                        for acc_balance in balances_data.get("accounts", []):
+                            if acc_balance["account_id"] == checking_account_id:
+                                checking_balance = float(acc_balance["balances"].get("available", 0) or 0)
+                                break
+                except Exception as e:
+                    pass
+            
+            # Get savings account balance - sum all savings accounts
+            savings_accounts = fetch_all("""
+                SELECT account_id, plaid_token
+                FROM accounts 
+                WHERE user_id = ? 
+                AND account_type = 'savings'
+                AND plaid_token IS NOT NULL
+            """, (self.user_id,))
+            
+            if savings_accounts:
+                for savings_account in savings_accounts:
+                    savings_account_id = savings_account['account_id'] if 'account_id' in savings_account.keys() else None
+                    try:
+                        balances_data = get_account_balances(savings_account['plaid_token'] if 'plaid_token' in savings_account.keys() else None)
+                        if "error" not in balances_data:
+                            for acc_balance in balances_data.get("accounts", []):
+                                if acc_balance["account_id"] == savings_account_id:
+                                    balance = float(acc_balance["balances"].get("available", 0) or 0)
+                                    savings_balance += balance
+                    except Exception as e:
+                        pass
+            
+            # Show file dialog
+            default_filename = f"bank_statement_{start_date.strftime('%Y%m%d')}_to_{end_date.strftime('%Y%m%d')}.pdf"
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Bank Statement",
+                default_filename,
+                "PDF Files (*.pdf);;All Files (*)"
+            )
+            
+            if not file_path:
+                return  # User cancelled
+            
+            # Generate PDF
+            from core.pdf_statement import generate_bank_statement
+            
+            success = generate_bank_statement(
+                output_path=file_path,
+                user_id=self.user_id,
+                start_date=start_date,
+                end_date=end_date,
+                transactions=transactions_list,
+                checking_balance=checking_balance,
+                savings_balance=savings_balance,
+                checking_account_id=checking_account_id,
+                savings_account_id=savings_account_id,
+                commitments=None  # Commitments not currently shown in reports
+            )
+            
+            if success:
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Bank statement saved successfully to:\n{file_path}"
+                )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Error",
+                    "Failed to generate bank statement. Please try again."
+                )
+                
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"An error occurred while generating the bank statement:\n{str(e)}"
+            )
     
     def load_data(self):
         """Load chart and badge data"""

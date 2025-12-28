@@ -160,9 +160,14 @@ class CircularCommitment(QWidget):
 
             painter.drawArc(10,10,80,80,start_angle,span_angle)
 
-        # Draw amount text with theme-aware color
-        painter.setPen(self._text_color)
-        painter.setFont(QFont("Segoe UI",11,QFont.Bold))
+        # Draw amount text with theme-aware color (darker for better contrast in dark mode)
+        if theme_manager.current_theme == "dark":
+            # Use even darker color for amount text inside circle for maximum contrast
+            amount_color = QColor("#0a1519")  # Very dark, almost black for best readability
+        else:
+            amount_color = self._text_color
+        painter.setPen(amount_color)
+        painter.setFont(QFont("Segoe UI",12,QFont.Bold))
         painter.drawText(5,5,90,90,Qt.AlignCenter,f"${self.expected_amount:.0f}")
 
         painter.end()
