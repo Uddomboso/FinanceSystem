@@ -2,6 +2,8 @@ from PyQt5.QtWidgets import QWidget,QVBoxLayout,QLabel
 from PyQt5.QtCore import Qt,QTimer,QPropertyAnimation,pyqtProperty,QPoint
 from PyQt5.QtGui import QFont,QColor,QPainter,QPen,QPainterPath
 import qtawesome as qta
+from core.theme_manager import theme_manager
+from assets.styles.penny_colors import PennyColors
 
 
 class CircularCommitment(QWidget):
@@ -16,6 +18,7 @@ class CircularCommitment(QWidget):
         self.status = status  # "pending", "paid", "overdue"
         self.user_color = self.mute_color(user_color)
         self._progress = 0
+        self._text_color = QColor("#1F2937")  # Default, will be updated
 
         self.setFixedSize(140,160)
         self.setup_ui()
@@ -52,20 +55,37 @@ class CircularCommitment(QWidget):
 
         # Amount label (will be drawn in paintEvent)
 
-        # Category name
+        # Category name with theme-aware color
         self.name_label = QLabel(self.category_name)
         self.name_label.setAlignment(Qt.AlignCenter)
-        self.name_label.setStyleSheet("""
+        self.update_text_colors()
+
+        layout.addWidget(self.circle_container)
+        layout.addWidget(self.name_label)
+
+    def update_text_colors(self):
+        """Update text colors based on current theme"""
+        p = PennyColors.get_palette(theme_manager.current_theme)
+        
+        # For circular commitments, use dark text on light pastel backgrounds
+        # The circles are always light (pastel muted colors), so we need dark text for contrast
+        if theme_manager.current_theme == "dark":
+            # In dark mode, use dark text on the light pastel circles
+            text_color = "#1a3b46"  # Dark teal for good contrast on pastel backgrounds
+        else:
+            # In light mode, use normal dark text
+            text_color = p['text_primary']
+        
+        self.name_label.setStyleSheet(f"""
             font-size: 12px;
             font-weight: 600;
-            color: #374151;
+            color: {text_color};
             background: transparent;
             border: none;
             margin-top: 4px;
         """)
-
-        layout.addWidget(self.circle_container)
-        layout.addWidget(self.name_label)
+        # Store the text color for use in paintEvent (amount inside circle)
+        self._text_color = QColor(text_color)
 
     def update_status_icon(self):
         """Update the status icon based on current state"""
@@ -140,8 +160,8 @@ class CircularCommitment(QWidget):
 
             painter.drawArc(10,10,80,80,start_angle,span_angle)
 
-        # Draw amount text
-        painter.setPen(QColor("#1F2937"))
+        # Draw amount text with theme-aware color
+        painter.setPen(self._text_color)
         painter.setFont(QFont("Segoe UI",11,QFont.Bold))
         painter.drawText(5,5,90,90,Qt.AlignCenter,f"${self.expected_amount:.0f}")
 

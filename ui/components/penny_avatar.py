@@ -8,6 +8,8 @@ from PyQt5.QtWidgets import QLabel
 from PyQt5.QtCore import Qt,QTimer
 from PyQt5.QtGui import QPixmap,QPainter,QRadialGradient,QColor,QPen
 import random
+import json
+import time
 
 
 class PennyAvatar(QLabel):
@@ -19,14 +21,17 @@ class PennyAvatar(QLabel):
         self.is_blinking = False
         self.current_emotion = "neutral"  # neutral, happy, excited, concerned, supportive
         self.emotion_color_map = {
-            "neutral": ("#FBBF24","#F59E0B"),
-            "happy": ("#34D399","#10B981"),
-            "excited": ("#F472B6","#EC4899"),
-            "concerned": ("#FCD34D","#F59E0B"),
-            "supportive": ("#93C5FD","#3B82F6"),
-            "celebratory": ("#A78BFA","#8B5CF6"),
-            "positive": ("#34D399","#10B981"),
-            "friendly": ("#FBBF24","#F59E0B")
+            "neutral": ("#FBBF24","#F59E0B"),  # Yellow
+            "happy": ("#34D399","#10B981"),  # Green
+            "excited": ("#F472B6","#EC4899"),  # Pink
+            "concerned": ("#FCD34D","#F59E0B"),  # Yellow
+            "supportive": ("#34D399","#10B981"),  # Green (upturned)
+            "celebratory": ("#34D399","#10B981"),  # Green (upturned)
+            "positive": ("#34D399","#10B981"),  # Green (upturned)
+            "friendly": ("#FBBF24","#F59E0B"),  # Yellow
+            "warning": ("#FCD34D","#F59E0B"),  # Yellow (downturned)
+            "alert": ("#FEE2E2","#FCA5A5"),  # Red (downturned)
+            "strict": ("#FCD34D","#F59E0B")  # Yellow (downturned)
         }
 
         self.setup_avatar()  # This method now exists!
@@ -145,37 +150,55 @@ class PennyAvatar(QLabel):
         center_x = self.size / 2
         center_y = self.size / 2
 
-        if self.current_emotion in ["happy","excited","celebratory","positive"]:
-            # Big happy smile
-            painter.drawArc(
-                int(center_x - 8),
-                int(center_y + 2),
-                16,8,
-                0,-180 * 16  # Upward smile
-            )
-        elif self.current_emotion == "concerned":
-            # Small, concerned mouth
-            painter.drawArc(
-                int(center_x - 4),
-                int(center_y + 4),
-                8,4,
-                0,180 * 16  # Neutral/slightly concerned
-            )
-        elif self.current_emotion == "supportive":
-            # Gentle, supportive smile
+        # Map expressions to mouth states based on expression (not mood)
+        # Downturned mouth: strict/alert/warning
+        downturned_expressions = ["strict", "alert", "warning"]
+        # Upturned mouth: supportive/positive/celebratory/happy/excited
+        upturned_expressions = ["supportive", "positive", "celebratory", "happy", "excited"]
+        
+        is_downturned = self.current_emotion in downturned_expressions
+        is_upturned = self.current_emotion in upturned_expressions
+        
+        # #region agent log
+        try:
+            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"A","location":"penny_avatar.py:_draw_emotional_mouth","message":"Drawing mouth expression","data":{"emotion":self.current_emotion,"is_downturned":is_downturned,"is_upturned":is_upturned},"timestamp":int(time.time()*1000)}) + '\n')
+        except: pass
+        # #endregion
+        
+        if is_downturned:
+            # Downturned mouth (frown) for strict/alert expressions
             painter.drawArc(
                 int(center_x - 6),
-                int(center_y + 3),
-                12,6,
-                0,-180 * 16  # Gentle upward smile
+                int(center_y + 1),
+                12,8,
+                0,180 * 16  # Downward frown
             )
+        elif is_upturned:
+            # Upturned mouth (smile) for supportive/positive expressions
+            if self.current_emotion in ["supportive", "positive"]:
+                # Gentle supportive/positive smile
+                painter.drawArc(
+                    int(center_x - 6),
+                    int(center_y + 3),
+                    12,6,
+                    0,-180 * 16  # Gentle upward smile
+                )
+            else:
+                # Big happy smile for excited/celebratory
+                painter.drawArc(
+                    int(center_x - 8),
+                    int(center_y + 2),
+                    16,8,
+                    0,-180 * 16  # Upward smile
+                )
         else:
-            # Neutral smile (friendly, neutral)
+            # Neutral mouth (neutral expression)
             painter.drawArc(
                 int(center_x - 6),
-                int(center_y + 3),
-                12,6,
-                0,-180 * 16  # Happy smile
+                int(center_y + 4),
+                12,4,
+                0,180 * 16  # Neutral/straight line
             )
 
     def start_blink_animation(self):

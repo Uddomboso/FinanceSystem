@@ -31,7 +31,7 @@ class SettingsWindow(QWidget):
         self.current_settings = {}
         # Ensure new preference columns exist without requiring verification flows
         self.ensure_additional_setting_columns()
-        self._current_section = "appearance"
+        self._current_section = "account"
         self._label_styles = []
         self._all_checkboxes = []
         self._all_combos = []
@@ -270,11 +270,8 @@ class SettingsWindow(QWidget):
         split_layout.setSpacing(16)
 
         self._nav_items = [
-            ("appearance", "Appearance", "fa5s.palette"),
-            ("language", "Language & Region", "fa5s.globe"),
-            ("currency", "Currency & Numbers", "fa5s.dollar-sign"),
-            ("notifications", "Notifications", "fa5s.bell"),
             ("account", "Account Information", "fa5s.user"),
+            ("appearance", "Appearance", "fa5s.palette"),
             ("advanced", "Advanced", "fa5s.cogs"),
         ]
         sidebar = self.build_sidebar()
@@ -361,9 +358,6 @@ class SettingsWindow(QWidget):
         self._page_indices = {}
         builders = {
             "appearance": self.setup_appearance_section,
-            "language": self.setup_language_section,
-            "currency": self.setup_currency_section,
-            "notifications": self.setup_notifications_section,
             "account": self.setup_account_section,
             "advanced": self.setup_advanced_section,
         }
@@ -382,7 +376,7 @@ class SettingsWindow(QWidget):
             self._page_indices[key] = index
 
         # Default selection
-        self.show_section("appearance")
+        self.show_section("account")
 
     def show_section(self, key):
         """Switch to the requested section and update nav state."""
@@ -393,7 +387,7 @@ class SettingsWindow(QWidget):
         self._current_section = key
         
     def setup_appearance_section(self):
-        """Setup appearance settings (dark mode, color themes)"""
+        """Setup appearance settings (dark mode, font size)"""
         group = self.create_settings_group("Appearance", "fa5s.palette")
         
         # Dark mode toggle
@@ -406,34 +400,22 @@ class SettingsWindow(QWidget):
         dark_mode_layout.addStretch()
         group.layout().addLayout(dark_mode_layout)
         
-        # Custom color picker (hidden by default)
-        self.custom_color_widget = QWidget()
-        self.custom_color_layout = QHBoxLayout(self.custom_color_widget)
-        self.custom_color_layout.setContentsMargins(0, 0, 0, 0)
-        custom_color_label = QLabel("Custom Accent Color:")
-        custom_color_label.setFont(QFont("Segoe UI", 12))
-        self._register_label(custom_color_label, "primary")
-        self.custom_color_layout.addWidget(custom_color_label)
+        # Font size control
+        font_size_layout = QHBoxLayout()
+        font_size_label = QLabel("Font Size:")
+        font_size_label.setFont(QFont("Segoe UI", 12))
+        self._register_label(font_size_label, "primary")
+        font_size_layout.addWidget(font_size_label)
         
-        self.color_picker_btn = QPushButton("Choose Color")
-        self.color_picker_btn.setFont(QFont("Segoe UI", 12))
-        self.color_picker_btn.setStyleSheet("""
-            QPushButton {
-                background: #d6733a;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 8px 16px;
-            }
-            QPushButton:hover {
-                background: #b45131;
-            }
-        """)
-        self.color_picker_btn.clicked.connect(self.open_color_picker)
-        self.custom_color_layout.addWidget(self.color_picker_btn)
-        self.custom_color_layout.addStretch()
-        self.custom_color_widget.setVisible(False)
-        group.layout().addWidget(self.custom_color_widget)
+        self.font_size_combo = QComboBox()
+        self.font_size_combo.addItems(["Small", "Medium", "Large"])
+        self.font_size_combo.setCurrentText("Medium")
+        self.font_size_combo.setFont(QFont("Segoe UI", 12))
+        self._register_combo(self.font_size_combo)
+        self.font_size_combo.currentTextChanged.connect(self.on_font_size_changed)
+        font_size_layout.addWidget(self.font_size_combo)
+        font_size_layout.addStretch()
+        group.layout().addLayout(font_size_layout)
         
         page = QWidget()
         page_layout = QVBoxLayout(page)
@@ -613,7 +595,7 @@ class SettingsWindow(QWidget):
         
         self.username_edit = QLineEdit()
         self.username_edit.setFont(QFont("Segoe UI", 12))
-        self.username_edit.setStyleSheet(self._lineedit_style)
+        self._register_lineedit(self.username_edit)
         username_layout.addWidget(self.username_edit)
         username_layout.addStretch()
         group.layout().addLayout(username_layout)
@@ -628,21 +610,33 @@ class SettingsWindow(QWidget):
         
         self.email_edit = QLineEdit()
         self.email_edit.setFont(QFont("Segoe UI", 12))
-        self.email_edit.setPlaceholderText("Leave blank to use a local default; no verification needed")
-        self.email_edit.setStyleSheet(self._lineedit_style)
+        self.email_edit.setPlaceholderText("user@example.com")
+        self._register_lineedit(self.email_edit)
         email_layout.addWidget(self.email_edit)
         email_layout.addStretch()
         group.layout().addLayout(email_layout)
 
-        # Email helper text
-        email_help = QLabel("Tip: Keep this blank to use a local default email. No verification required here.")
-        email_help.setStyleSheet(f"color: {self._palette['text_secondary']}; font-size: 11px; margin-left: 120px;")
-        group.layout().addWidget(email_help)
-
-        # Password note (no inline verification flow)
-        password_note = QLabel("Password changes are handled in the security section; no prompts here.")
-        password_note.setStyleSheet(f"color: {self._palette['text_secondary']}; font-size: 11px; margin-left: 120px;")
-        group.layout().addWidget(password_note)
+        # Change password button
+        password_layout = QHBoxLayout()
+        password_layout.setContentsMargins(120, 12, 0, 0)
+        self.change_password_btn = QPushButton("Change Password")
+        self.change_password_btn.setFont(QFont("Segoe UI", 12))
+        self.change_password_btn.setStyleSheet("""
+            QPushButton {
+                background: #3B82F6;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 20px;
+            }
+            QPushButton:hover {
+                background: #2563EB;
+            }
+        """)
+        self.change_password_btn.clicked.connect(self.change_password)
+        password_layout.addWidget(self.change_password_btn)
+        password_layout.addStretch()
+        group.layout().addLayout(password_layout)
         
         page = QWidget()
         page_layout = QVBoxLayout(page)
@@ -656,20 +650,11 @@ class SettingsWindow(QWidget):
         """Setup advanced settings"""
         group = self.create_settings_group("Advanced", "fa5s.cogs")
         
-        # Auto-save
-        autosave_layout = QHBoxLayout()
-        self.auto_save = QCheckBox("Auto-save changes")
-        self.auto_save.setFont(QFont("Segoe UI", 12))
-        self.auto_save.setStyleSheet(self._checkbox_style)
-        autosave_layout.addWidget(self.auto_save)
-        autosave_layout.addStretch()
-        group.layout().addLayout(autosave_layout)
-        
-        # Data export
+        # Data export and import
         export_layout = QHBoxLayout()
         export_label = QLabel("Data Management:")
         export_label.setFont(QFont("Segoe UI", 12))
-        export_label.setStyleSheet(f"color: {self._palette['text_primary']};")
+        self._register_label(export_label, "primary")
         export_layout.addWidget(export_label)
         
         self.export_btn = QPushButton("Export Data")
@@ -680,7 +665,7 @@ class SettingsWindow(QWidget):
                 color: white;
                 border: none;
                 border-radius: 8px;
-                padding: 8px 16px;
+                padding: 10px 20px;
             }
             QPushButton:hover {
                 background: #059669;
@@ -697,7 +682,7 @@ class SettingsWindow(QWidget):
                 color: white;
                 border: none;
                 border-radius: 8px;
-                padding: 8px 16px;
+                padding: 10px 20px;
             }
             QPushButton:hover {
                 background: #2563EB;
@@ -829,32 +814,19 @@ class SettingsWindow(QWidget):
             if settings:
                 # Load appearance settings
                 self.dark_mode_checkbox.setChecked(bool(settings['dark_mode'] if 'dark_mode' in settings.keys() else False))
-                # Font control removed; ignore font settings
-
-                # Load language settings
-                self.language_combo.setCurrentText(settings['language'] if 'language' in settings.keys() else 'English')
-                self.date_format_combo.setCurrentText(settings['date_format'] if 'date_format' in settings.keys() else 'MM/DD/YYYY')
                 
-                # Load currency settings
-                self.currency_combo.setCurrentText(settings['currency'] if 'currency' in settings.keys() else 'USD')
-                self.number_format_combo.setCurrentText(settings['number_format'] if 'number_format' in settings.keys() else '1,234.56')
-                
-                # Load notification settings
-                self.email_notifications.setChecked(bool(settings['email_notifications'] if 'email_notifications' in settings.keys() else True))
-                self.push_notifications.setChecked(bool(settings['push_notifications'] if 'push_notifications' in settings.keys() else True))
-                self.budget_alerts.setChecked(bool(settings['budget_alerts_enabled'] if 'budget_alerts_enabled' in settings.keys() else True))
-                self.bill_reminders.setChecked(bool(settings['bill_reminders_enabled'] if 'bill_reminders_enabled' in settings.keys() else True))
-                self.frequency_combo.setCurrentText(settings['notification_frequency'] if 'notification_frequency' in settings.keys() else 'Daily')
-                self.currency_refresh.setChecked(bool(settings['currency_auto_refresh'] if 'currency_auto_refresh' in settings.keys() else True))
+                # Load font size (map from database value to combo box)
+                font_family = settings.get('font_family', 'Medium')
+                if 'font_family' in settings.keys() and font_family in ["Small", "Medium", "Large"]:
+                    self.font_size_combo.setCurrentText(font_family)
+                else:
+                    self.font_size_combo.setCurrentText("Medium")
                 
                 # Load account settings
                 user_info = fetch_one("SELECT username, email FROM users WHERE user_id = ?", (self.user_id,))
                 if user_info:
                     self.username_edit.setText(user_info['username'] if 'username' in user_info.keys() else '')
                     self.email_edit.setText(user_info['email'] if 'email' in user_info.keys() else '')
-                
-                # Load advanced settings
-                self.auto_save.setChecked(bool(settings['auto_save'] if 'auto_save' in settings.keys() else True))
                 
                 # Store current settings for comparison
                 self.current_settings = dict(settings)
@@ -923,6 +895,37 @@ class SettingsWindow(QWidget):
             self.apply_light_theme()
         # Refresh local widgets to avoid stale QSS until navigation changes
         self.refresh_theme_ui()
+
+    def on_font_size_changed(self, size_label):
+        """Apply font size immediately when changed."""
+        # #region agent log
+        import json
+        from datetime import datetime
+        try:
+            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({"location":"settings_window.py:905","message":"font size changed in settings","data":{"new_size":size_label},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","runId":"run1","hypothesisId":"E"})+'\n')
+        except: pass
+        # #endregion
+        try:
+            from core.font_manager import apply_font_size
+            apply_font_size(size_label)
+            
+            # Refresh navbar and dashboard components to apply scaled fonts
+            # Find the main dashboard window
+            parent = self.parent()
+            while parent:
+                if hasattr(parent, 'nav_bar') and hasattr(parent.nav_bar, 'refresh_theme'):
+                    parent.nav_bar.refresh_theme()
+                    # #region agent log
+                    try:
+                        with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                            f.write(json.dumps({"location":"settings_window.py:921","message":"navbar refreshed after font change","data":{"size":size_label},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","runId":"run1","hypothesisId":"C,E"})+'\n')
+                    except: pass
+                    # #endregion
+                    break
+                parent = parent.parent() if hasattr(parent, 'parent') and callable(parent.parent) else None
+        except Exception as e:
+            print(f"Error applying font size: {e}")
             
     def open_color_picker(self):
         """Open color picker for custom accent color"""
@@ -1005,21 +1008,10 @@ class SettingsWindow(QWidget):
             if not self.validate_settings():
                 return
                 
-            # Prepare settings data
+            # Prepare settings data (only update visible settings)
             settings_data = {
                 'dark_mode': self.dark_mode_checkbox.isChecked(),
-                'language': self.language_combo.currentText(),
-                'date_format': self.date_format_combo.currentText(),
-                'currency': self.currency_combo.currentText(),
-                'number_format': self.number_format_combo.currentText(),
-                'email_notifications': self.email_notifications.isChecked(),
-                'push_notifications': self.push_notifications.isChecked(),
-                'budget_alerts_enabled': self.budget_alerts.isChecked(),
-                'bill_reminders_enabled': self.bill_reminders.isChecked(),
-                'notification_frequency': self.frequency_combo.currentText(),
-                'currency_auto_refresh': self.currency_refresh.isChecked(),
-                'auto_save': self.auto_save.isChecked(),
-                'custom_accent_color': getattr(self, 'custom_accent_color', '#d6733a'),
+                'font_family': self.font_size_combo.currentText(),  # Store font size selection
                 'updated_at': datetime.now().isoformat()
             }
             
@@ -1056,6 +1048,9 @@ class SettingsWindow(QWidget):
             
             # Apply theme changes immediately
             self.apply_theme_changes(settings_data)
+            
+            # Show success message
+            QMessageBox.information(self, "Success", "Settings saved successfully!")
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save settings: {str(e)}")

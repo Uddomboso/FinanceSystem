@@ -2,9 +2,10 @@ from PyQt5.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout,
     QComboBox, QLineEdit, QPushButton, QMessageBox, QProgressBar
 )
-from core.budget import set_budget, get_spent, get_budget
+from core.budget import set_budget, get_budget, get_spent_current_month
 from database.db_manager import fetch_all, fetch_one
 from core.currency import convert
+from datetime import date
 
 class BudgetWindow(QWidget):
     def __init__(self, user_id):
@@ -63,11 +64,12 @@ class BudgetWindow(QWidget):
         if not cat_id:
             return None,None,None
 
-        # Get spent amount for this category (converted to user currency if needed)
-        spent = get_spent(self.user_id,cat_id)  # from core.budget
+        # FIXED: Use time-bounded monthly spending instead of lifetime totals
+        # Get spent amount for CURRENT MONTH (converted to user currency if needed)
+        spent = get_spent_current_month(self.user_id, cat_id)  # from core.budget (time-bounded)
 
         # Get budget limit for this category
-        budget = get_budget(self.user_id,cat_id)  # from core.budget
+        budget = get_budget(self.user_id, cat_id)  # from core.budget
 
         # Get user currency from settings
         curr = self.get_user_currency()

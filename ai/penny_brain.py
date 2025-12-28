@@ -281,5 +281,344 @@ class PennyBrain:
             "in_demo_mode": Config.DEMO_MODE
         }
 
+    def generate_emotion_phrase(self, mood_label: str, context: dict, advice_mode: str = "standard") -> str:
+        """Generate one short emotional framing sentence (no advice, max 12 words, lowercase).
+        
+        Args:
+            mood_label: The mood level (excellent, good, neutral, concerned, needs_attention)
+            context: Brief context summary dict
+            
+        Returns:
+            Single lowercase sentence with emotional framing, no advice or numbers
+        """
+        # Hardcoded fallback phrases per mood
+        fallback_phrases = {
+            "excellent": "oh wow, you're really nailing this lately.",
+            "good": "this is looking pretty solid right now.",
+            "neutral": "things are steady, which is fine.",
+            "concerned": "this is getting a bit tight, but it's manageable.",
+            "needs_attention": "okay, we need to pay attention here."
+        }
+        
+        # Check circuit breaker
+        if self.circuit_open and not self._should_try_recovery():
+            logger.warning("⏸️  Circuit open - using fallback emotion phrase")
+            return fallback_phrases.get(mood_label, fallback_phrases["neutral"])
+        
+        if Config.DEMO_MODE:
+            return fallback_phrases.get(mood_label, fallback_phrases["neutral"])
+        
+        try:
+            # Build context summary for prompt
+            context_summary = self._build_context_summary(context)
+            
+            mode_instruction = ""
+            if advice_mode == "strict":
+                mode_instruction = "Use direct acknowledgment, no softening."
+            elif advice_mode == "supportive":
+                mode_instruction = "Use gentle, reassuring tone. Acknowledge effort."
+            elif advice_mode == "cautionary":
+                mode_instruction = "Use balanced tone - acknowledge good state but note vigilance."
+            
+            prompt = f"""Generate ONE short emotional framing sentence (max 12 words, lowercase) for someone whose financial mood is: {mood_label}
+
+Context: {context_summary}
+{mode_instruction}
+
+CRITICAL RULES:
+- Output ONLY one sentence
+- Lowercase only
+- No advice, numbers, or solutions
+- No explanations
+- Casual, human tone (adjust based on mode instruction)
+- Pure emotional response/acknowledgment
+- No greeting, no markdown, no emojis
+
+Example for 'concerned': "this is getting a bit tight, but it's manageable."
+Example for 'excellent': "oh wow, you're really nailing this lately."
+
+Response:"""
+            
+            headers = {
+                "Authorization": f"Bearer {Config.GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            
+            data = {
+                "model": "llama-3.1-8b-instant",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are an emotional companion. Generate ONLY one short lowercase sentence with emotional framing. Never give advice, numbers, or solutions."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "max_tokens": 30,
+                "temperature": 0.8,
+                "top_p": 0.9
+            }
+            
+            response = requests.post(
+                Config.GROQ_API_URL,
+                headers=headers,
+                json=data,
+                timeout=10
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            if "choices" not in result or not result["choices"]:
+                raise ValueError("No choices in API response")
+            
+            raw_phrase = result["choices"][0]["message"]["content"].strip()
+            
+            # Clean and validate response
+            cleaned = raw_phrase.lower().strip()
+            # Remove quotes, markdown, emojis
+            cleaned = re.sub(r'["\'`*]', '', cleaned)
+            cleaned = re.sub(r'```.*?```', '', cleaned, flags=re.DOTALL)
+            cleaned = re.sub(r'[^\w\s,.]', '', cleaned)  # Remove emojis and special chars except punctuation
+            cleaned = cleaned.strip()
+            
+            # Ensure it's a single sentence, max ~12 words
+            words = cleaned.split()
+            if len(words) > 15:  # Allow a bit over for safety
+                cleaned = ' '.join(words[:12]) + '.'
+            
+            # Validate it doesn't contain advice keywords
+            advice_keywords = ['should', 'need to', 'must', 'recommend', 'suggest', 'try', 'consider', 'do this']
+            if any(keyword in cleaned for keyword in advice_keywords):
+                logger.warning("AI response contained advice keywords, using fallback")
+                return fallback_phrases.get(mood_label, fallback_phrases["neutral"])
+            
+            if cleaned:
+                # Ensure it ends with punctuation
+                if not cleaned.endswith(('.', '!', '?')):
+                    cleaned += '.'
+                return cleaned
+            
+            return fallback_phrases.get(mood_label, fallback_phrases["neutral"])
+            
+        except Exception as e:
+            logger.error(f"❌ Emotion phrase generation failed: {e}")
+            self.failures += 1
+            if self.failures >= self.max_failures:
+                self.circuit_open = True
+                self.circuit_opened_at = datetime.now()
+            return fallback_phrases.get(mood_label, fallback_phrases["neutral"])
+    
+    def generate_financial_actions(self, context: dict, advice_mode: str = "standard") -> list[str]:
+        """Generate 1-2 concrete financial actions (unemotional, practical, bullet points only).
+        
+        Args:
+            context: Financial context dictionary
+            advice_mode: Advice style mode ("standard", "strict", "supportive", "cautionary")
+            
+        Returns:
+            List of 1-2 concrete action strings, no emotions or explanations
+        """
+        # Improved fallback rules with priority logic
+        def get_fallback_actions():
+            if not context:
+                return ["prioritize essential bills", "pause non-essential spending"]
+            
+            # Priority 1: Unpaid commitments (highest priority)
+            commitment_cats = context.get('commitment_categories', [])
+            if commitment_cats:
+                top_commitment = commitment_cats[0]
+                return [f"pay {top_commitment} commitment first", "pause discretionary spending"]
+            
+            # Priority 2: Budget overruns
+            budget_status = context.get('budget_status', 0)
+            if budget_status > 0:
+                over_budget_count = budget_status
+                return [f"cut spending in {over_budget_count} over-budget categories", "reduce discretionary expenses"]
+            
+            # Priority 3: Top spending categories (only if significant)
+            top_categories = context.get('top_categories', [])
+            if top_categories:
+                category = top_categories[0]
+                return [f"reduce {category} spending", "review other top categories"]
+            
+            return ["prioritize essential bills", "pause non-essential spending"]
+        
+        # Check circuit breaker
+        if self.circuit_open and not self._should_try_recovery():
+            logger.warning("⏸️  Circuit open - using fallback financial actions")
+            return get_fallback_actions()
+        
+        if Config.DEMO_MODE:
+            return get_fallback_actions()
+        
+        try:
+            # Build context summary
+            context_summary = self._build_context_summary(context)
+            
+            mode_instruction = ""
+            if advice_mode == "strict":
+                mode_instruction = "Use direct, no-nonsense language. Focus on immediate priorities and tradeoffs."
+            elif advice_mode == "supportive":
+                mode_instruction = "Frame actions as manageable steps. Acknowledge constraints."
+            elif advice_mode == "cautionary":
+                mode_instruction = "Include one preventive action to maintain current good state."
+            
+            prompt = f"""Generate 1-2 concrete financial decisions (not generic advice).
+
+Context: {context_summary}
+{mode_instruction}
+
+CRITICAL RULES:
+- Output ONLY 1-2 specific financial decisions
+- Each must be a concrete action (what to do, which bill, which category)
+- REQUIRED: Include prioritization or tradeoff (e.g., "first", "instead of", "before")
+- FORBIDDEN: Generic phrases like "review", "consider", "check", "think about"
+- No emotions, greetings, or encouragement words
+- No explanations or "why"
+- No markdown formatting (no bullets, no dashes in output)
+- Each action on its own line
+- Must be immediately actionable
+
+Good examples:
+pay electricity bill first, skip gym membership this month
+reduce dining out by 50%, increase grocery budget instead
+transfer $200 to savings account before next paycheck
+
+Bad examples (too generic):
+review your spending
+consider cutting expenses
+think about your budget
+
+Response:"""
+            
+            headers = {
+                "Authorization": f"Bearer {Config.GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            
+            data = {
+                "model": "llama-3.1-8b-instant",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a precise financial advisor. Generate ONLY 1-2 concrete financial decisions with prioritization. FORBIDDEN: generic verbs like 'review', 'consider', 'check'. REQUIRED: specific actions with tradeoffs or priorities. No emotions, explanations, or markdown."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "max_tokens": 60,
+                "temperature": 0.5,
+                "top_p": 0.9
+            }
+            
+            response = requests.post(
+                Config.GROQ_API_URL,
+                headers=headers,
+                json=data,
+                timeout=10
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            if "choices" not in result or not result["choices"]:
+                raise ValueError("No choices in API response")
+            
+            raw_actions = result["choices"][0]["message"]["content"].strip()
+            
+            # Parse actions - split by newlines and clean
+            lines = [line.strip() for line in raw_actions.split('\n') if line.strip()]
+            actions = []
+            
+            for line in lines:
+                # Remove markdown bullets, dashes, numbers
+                cleaned = re.sub(r'^[\s]*[-*•]\s*', '', line)
+                cleaned = re.sub(r'^\d+\.\s*', '', cleaned)
+                cleaned = re.sub(r'["\'`*]', '', cleaned)
+                cleaned = cleaned.strip().lower()
+                
+                # Filter out explanation-like phrases and generic verbs
+                if cleaned and len(cleaned) > 3:
+                    # Skip generic verbs
+                    generic_verbs = ['review', 'consider', 'check', 'think about', 'look at', 'examine', 'analyze']
+                    if any(verb in cleaned for verb in generic_verbs):
+                        continue  # Skip this action entirely
+                    
+                    # Skip if it looks like explanation/emotion
+                    skip_patterns = ['because', 'this will', 'remember', 'keep in mind', 'don\'t forget']
+                    if not any(pattern in cleaned for pattern in skip_patterns):
+                        actions.append(cleaned)
+            
+            # Limit to 2 actions
+            actions = actions[:2]
+            
+            if len(actions) >= 1:
+                return actions
+            
+            return get_fallback_actions()
+            
+        except Exception as e:
+            logger.error(f"❌ Financial actions generation failed: {e}")
+            self.failures += 1
+            if self.failures >= self.max_failures:
+                self.circuit_open = True
+                self.circuit_opened_at = datetime.now()
+            return get_fallback_actions()
+    
+    def _build_context_summary(self, context: dict) -> str:
+        """Build a brief text summary from context dict for prompts"""
+        if not context:
+            return "standard financial situation"
+        
+        parts = []
+        
+        # Prioritize commitments - always mention unpaid commitments first
+        if 'commitment_categories' in context and context['commitment_categories']:
+            commitment_count = len(context['commitment_categories'])
+            if commitment_count > 0:
+                # Show top 2 commitment categories
+                top_commitments = ', '.join(context['commitment_categories'][:2])
+                parts.append(f"unpaid commitments: {top_commitments}")
+        
+        # Then mention significant spending categories (excluding commitments already mentioned)
+        if 'top_categories' in context and context['top_categories']:
+            # Filter out commitment categories already mentioned
+            commitment_cats = set(context.get('commitment_categories', []))
+            spending_cats = [cat for cat in context['top_categories'][:3] if cat not in commitment_cats]
+            if spending_cats:
+                cats = ', '.join(spending_cats)
+                parts.append(f"top spending: {cats}")
+        
+        if 'budget_status' in context:
+            over_budget = context['budget_status']
+            if over_budget > 0:
+                parts.append(f"{over_budget} categories over budget")
+        
+        return ". ".join(parts) if parts else "standard financial situation"
+    
+    def _build_contextual_prompt(self, financial_context):
+        """Build contextual prompt for financial tips (stub for existing code)"""
+        if not financial_context:
+            return "Generate a helpful financial tip."
+        
+        context_parts = []
+        if 'top_categories' in financial_context:
+            cats = ', '.join(financial_context['top_categories'][:3])
+            context_parts.append(f"User's top spending categories: {cats}")
+        if 'budget_status' in financial_context:
+            over = financial_context['budget_status']
+            if over > 0:
+                context_parts.append(f"{over} categories are over budget")
+        
+        context_str = ". ".join(context_parts) if context_parts else "standard financial situation"
+        return f"Given this context: {context_str}. Generate a helpful, friendly financial tip."
+    
+    def _get_system_prompt(self):
+        """Get system prompt for financial tips (stub for existing code)"""
+        return """You are Penny, a friendly financial AI companion. Generate helpful, practical financial tips that are encouraging and supportive. Keep responses concise and actionable."""
+
 # Global instance
 penny_brain = PennyBrain()

@@ -884,6 +884,8 @@ class MetricsCarousel(QWidget):
 
     def create_finance_card(self,title,value,color,card_type):
         """Create a clean finance card with visible text"""
+        from core.font_manager import get_font_scale
+        
         card = QFrame()
         p = theme_palette()
         card.setStyleSheet(f"""
@@ -905,12 +907,25 @@ class MetricsCarousel(QWidget):
         main_layout.setContentsMargins(30,25,30,25)  # Increased padding
         main_layout.setSpacing(10)
 
+        # Get font scale factor
+        font_scale = get_font_scale()
+        title_font_size = int(16 * font_scale)
+        value_font_size = int(42 * font_scale)
+
         # Title label - make sure it's visible
         title_label = QLabel(title)
+        # #region agent log
+        import json
+        from datetime import datetime
+        try:
+            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({"location":"dashboard_main.py:914","message":"finance card title created SCALED","data":{"title":title,"base_size":16,"scale":font_scale,"scaled_size":title_font_size},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+'\n')
+        except: pass
+        # #endregion
         title_label.setStyleSheet(f"""
             QLabel {{
                 color: {theme_color('text_primary')};
-                font-size: 16px;
+                font-size: {title_font_size}px;
                 font-weight: 600;
                 background: transparent;
                 border: none;
@@ -920,10 +935,16 @@ class MetricsCarousel(QWidget):
 
         # Value label - make sure it's visible and large
         value_label = QLabel(value)
+        # #region agent log
+        try:
+            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({"location":"dashboard_main.py:939","message":"finance card value created SCALED","data":{"value":value,"base_size":42,"scale":font_scale,"scaled_size":value_font_size},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+'\n')
+        except: pass
+        # #endregion
         value_label.setStyleSheet(f"""
             QLabel {{
                 color: {color};
-                font-size: 42px;
+                font-size: {value_font_size}px;
                 font-weight: bold;
                 background: transparent;
                 border: none;
@@ -1087,9 +1108,16 @@ class ModernNavigationBar(QWidget):
 
     def refresh_theme(self, theme_name=None):
         """Reapply palette to all nav elements."""
+        from core.font_manager import get_font_scale
+        
         if theme_name:
             self.nav_palette = self.get_nav_palette(theme_name)
         p = self.nav_palette
+        
+        # Get font scale factor
+        font_scale = get_font_scale()
+        logo_font_size = int(18 * font_scale)
+        
         # Container background
         self.setStyleSheet(f"""
             ModernNavigationBar {{
@@ -1119,7 +1147,7 @@ class ModernNavigationBar(QWidget):
                 QLabel {{
                     color: {p['highlight']};
                     font-weight: bold;
-                    font-size: 18px;
+                    font-size: {logo_font_size}px;
                     background: {p['bg']};
                     border-radius: 12px;
                     padding: 10px;
@@ -1152,6 +1180,7 @@ class ModernNavigationBar(QWidget):
             """)
 
         # Nav buttons
+        nav_btn_font_size = int(18 * font_scale)
         if hasattr(self, "nav_buttons"):
             for text, btn in self.nav_buttons.items():
                 state_icon = qta.icon(
@@ -1168,7 +1197,7 @@ class ModernNavigationBar(QWidget):
                         border-radius: 8px;
                         padding: 10px 20px;
                         font-weight: 500;
-                        font-size: 18px;
+                        font-size: {nav_btn_font_size}px;
                         text-align: left;
                     }}
                     QPushButton:hover {{
@@ -1187,6 +1216,7 @@ class ModernNavigationBar(QWidget):
                 """)
 
         # Logout button
+        logout_btn_font_size = int(14 * font_scale)
         if hasattr(self, "logout_btn"):
             self.logout_btn.setIcon(qta.icon('fa5s.sign-out-alt', color=p['icon_inactive']))
             self.logout_btn.setStyleSheet(f"""
@@ -1196,7 +1226,7 @@ class ModernNavigationBar(QWidget):
                     border: 1px solid {p['notif_border']};
                     border-radius: 8px;
                     font-family: 'Poppins', sans-serif;
-                    font-size: 14px;
+                    font-size: {logout_btn_font_size}px;
                     font-weight: 500;
                     padding: 8px 16px;
                 }}
@@ -2615,7 +2645,11 @@ class CommitmentTrackerWidget(QWidget):
             dlg.commitment_added.connect(target_dashboard.handle_commitment_delta if hasattr(target_dashboard, 'handle_commitment_delta') else self.handle_commitment_added_signal)
         # Connect the signal for all commitment mutations
         if hasattr(dlg, 'commitments_changed'):
-            dlg.commitments_changed.connect(target_dashboard.balances_update_requested.emit)
+            # When commitments change, rebuild balance cards immediately
+            def on_commitments_changed():
+                if hasattr(target_dashboard, 'rebuild_overview_cards'):
+                    target_dashboard.rebuild_overview_cards()
+            dlg.commitments_changed.connect(on_commitments_changed)
         # Connect commitment creation signal for notification updates
         if hasattr(dlg, 'commitment_created') and hasattr(target_dashboard, 'notification_manager'):
             dlg.commitment_created.connect(lambda: target_dashboard.update_notification_badge())
@@ -2641,8 +2675,8 @@ class DashboardMain(QMainWindow):
         self.username = username
         self.previous_mood = None
         self.penny_personality = None
-        # Connect the class-level signal to the recompute+render method
-        self.balances_update_requested.connect(self.update_balance_cards_from_db)
+        # DEPRECATED: balances_update_requested signal - use rebuild_overview_cards() directly instead
+        # self.balances_update_requested.connect(self.update_balance_cards_from_db)
 
         # Initialize database v3 with settings support
         from database.db_manager import initialize_database_v3
@@ -2683,17 +2717,18 @@ class DashboardMain(QMainWindow):
 
 
     def refresh_dashboard(self):
-        """Refresh dashboard data including commitments"""
+        """Refresh dashboard data including commitments and balance cards"""
         # Refresh commitments if they exist
         if hasattr(self,'commitment_tracker'):
             self.commitment_tracker.refresh_commitments()
 
+        # Rebuild balance cards with fresh Plaid data and updated commitments
+        if hasattr(self, 'overview_layout'):
+            self.rebuild_overview_cards()
+
         # Refresh metrics carousel if it exists
         if hasattr(self,'metrics_carousel'):
             self.metrics_carousel.refresh_data()
-        
-        # Refresh metrics cards
-        if hasattr(self, 'metrics_carousel'):
             self.metrics_carousel.refresh_metrics_cards()
         
         # Refresh recent transactions if on dashboard page
@@ -2738,6 +2773,201 @@ class DashboardMain(QMainWindow):
         from core.commitment_manager import check_commitments
         check_commitments(self.user_id)
 
+    def rebuild_overview_cards(self):
+        """Rebuild the overview cards with fresh Plaid data and current commitments."""
+        if not hasattr(self, 'overview_layout'):
+            return
+        
+        # Clear existing cards
+        while self.overview_layout.count():
+            item = self.overview_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        
+        # Re-run setup_metrics_carousel to rebuild cards with fresh data
+        # We pass None as layout since cards will be added to existing overview_layout
+        self._rebuild_cards_in_layout(self.overview_layout)
+    
+    def _rebuild_cards_in_layout(self, overview_layout):
+        """Internal helper: fetch Plaid balances and build cards in the given layout."""
+        try:
+            from database.db_manager import fetch_all, fetch_one
+            from core.plaid_api import get_account_balances
+
+            # Get REAL checking account balance from Plaid ONLY (no simulated, no transaction fallback)
+            checking_balance = 0
+            has_plaid_checking = False
+
+            # Get Plaid checking accounts (which are stored as 'salary' type) - ONLY primary
+            plaid_accounts = fetch_all("""
+                SELECT account_id, plaid_token, account_type, bank_name
+                FROM accounts 
+                WHERE user_id = ? 
+                AND account_type = 'salary'
+                AND is_primary = 1
+                AND plaid_token IS NOT NULL
+            """,(self.user_id,))
+
+            if plaid_accounts:
+                has_plaid_checking = True
+                for account in plaid_accounts:
+                    # ONLY use Plaid API - no simulated_balance, no transaction fallback
+                    try:
+                        balances_data = get_account_balances(account["plaid_token"])
+                        if "error" in balances_data:
+                            logger.warning(f"Plaid balance error for account {account['account_id']}: {balances_data['error']}")
+                            continue
+                        for acc_balance in balances_data.get("accounts",[]):
+                            if acc_balance["account_id"] == account["account_id"]:
+                                balance = acc_balance["balances"].get("available",0)
+                                checking_balance += balance
+                    except Exception as e:
+                        logger.error(f"Error fetching balance for account {account['account_id']}: {e}")
+
+            # Get savings balance - ONLY from Plaid, no fallback
+            savings = 0
+            plaid_savings_accounts = fetch_all("""
+                SELECT account_id, plaid_token, account_type, bank_name
+                FROM accounts 
+                WHERE user_id = ? 
+                AND account_type = 'savings'
+                AND is_primary = 1
+                AND plaid_token IS NOT NULL
+            """,(self.user_id,))
+            
+            if plaid_savings_accounts:
+                # Get real savings balance from Plaid
+                for account in plaid_savings_accounts:
+                    try:
+                        balances_data = get_account_balances(account["plaid_token"])
+                        if "error" in balances_data:
+                            logger.warning(f"Plaid savings balance error for account {account['account_id']}: {balances_data['error']}")
+                            continue
+                        for acc_balance in balances_data.get("accounts",[]):
+                            if acc_balance["account_id"] == account["account_id"]:
+                                balance = acc_balance["balances"].get("available",0)
+                                savings += balance
+                    except Exception as e:
+                        logger.error(f"Error fetching savings balance for account {account['account_id']}: {e}")
+
+            # Get commitments (unpaid) - handle NULL is_paid values
+            commitments_row = fetch_one("""
+                SELECT COALESCE(SUM(amount), 0) AS total
+                FROM category_commitments
+                WHERE user_id = ? AND COALESCE(is_paid, 0) = 0
+            """,(self.user_id,))
+            try:
+                commitments = commitments_row["total"] if commitments_row and "total" in commitments_row.keys() and commitments_row["total"] is not None else 0
+            except (KeyError, TypeError, AttributeError):
+                commitments = 0
+
+            # Calculate balances - commitments ONLY affect computed value, never modify Plaid balance
+            price_after_commitments = checking_balance - commitments
+
+            # Get currency
+            user_currency = fetch_one("SELECT currency FROM settings WHERE user_id = ?",(self.user_id,))
+            try:
+                currency = user_currency["currency"] if user_currency and "currency" in user_currency.keys() else "USD"
+            except (KeyError, TypeError, AttributeError):
+                currency = "USD"
+
+            # Check if accounts exist
+            has_savings_account = fetch_one("""
+                SELECT account_id FROM accounts 
+                WHERE user_id = ? AND account_type = 'savings' AND is_primary = 1
+                LIMIT 1
+            """, (self.user_id,))
+            
+            has_main_account = fetch_one("""
+                SELECT account_id FROM accounts 
+                WHERE user_id = ? AND account_type = 'salary' AND is_primary = 1
+                LIMIT 1
+            """, (self.user_id,))
+            
+            has_savings = has_savings_account is not None
+            has_main = has_main_account is not None
+            
+            # Create cards
+            if has_savings and savings > 0:
+                savings_card = self.create_finance_card(
+                    "Savings Balance",
+                    f"{currency} {savings:,.2f}",
+                    theme_color('success'),
+                    "positive"
+                )
+            else:
+                def show_link_bank_savings():
+                    widget = self
+                    while widget:
+                        if hasattr(widget, 'show_link_bank'):
+                            widget.show_link_bank()
+                            return
+                        widget = widget.parent() if hasattr(widget, 'parent') and callable(widget.parent) else None
+                    from PyQt5.QtWidgets import QApplication
+                    for widget in QApplication.topLevelWidgets():
+                        if hasattr(widget, 'show_link_bank'):
+                            widget.show_link_bank()
+                            return
+                
+                savings_card = self.create_empty_card(
+                    " Savings Balance",
+                    "Add Savings Account",
+                    show_link_bank_savings
+                )
+
+            # Price After Commitments always shows as finance card
+            commitments_card = self.create_finance_card(
+                "Balance After Commitments",
+                f"{currency} {price_after_commitments:,.2f}",
+                theme_color('warning'),
+                "warning"
+            )
+            commitments_card.setFixedHeight(180)
+            self.commitments_card = commitments_card
+            if hasattr(commitments_card, "value_label"):
+                self.commitments_value_label = commitments_card.value_label
+            
+            # Available Balance
+            if has_main and checking_balance > 0:
+                available_card = self.create_finance_card(
+                    "Available Balance",
+                    f"{currency} {checking_balance:,.2f}",
+                    theme_color('success'),
+                    "positive"
+                )
+            else:
+                def show_link_bank_main():
+                    widget = self
+                    while widget:
+                        if hasattr(widget, 'show_link_bank'):
+                            widget.show_link_bank()
+                            return
+                        widget = widget.parent() if hasattr(widget, 'parent') and callable(widget.parent) else None
+                    from PyQt5.QtWidgets import QApplication
+                    for widget in QApplication.topLevelWidgets():
+                        if hasattr(widget, 'show_link_bank'):
+                            widget.show_link_bank()
+                            return
+                
+                available_card = self.create_empty_card(
+                    "Available Balance",
+                    "Add Bank Account",
+                    show_link_bank_main
+                )
+
+            # Add cards to layout
+            overview_layout.addWidget(savings_card)
+            overview_layout.addWidget(commitments_card)
+            overview_layout.addWidget(available_card)
+            
+            logger.info(f"[rebuild_cards] Plaid balances: checking={checking_balance} savings={savings} commitments={commitments} after={price_after_commitments}")
+            
+        except Exception as e:
+            logger.error(f"Error rebuilding overview cards: {e}")
+            import traceback
+            traceback.print_exc()
+
     def refresh_balance_cards(self):
         """Refresh only balance-related cards quickly."""
         try:
@@ -2752,7 +2982,7 @@ class DashboardMain(QMainWindow):
         except Exception as e:
             logger.warning(f"[dashboard] refresh_balance_cards error: {e}")
 
-    def update_balance_cards_from_db(self):
+    def update_balance_cards_from_db(self):  # DEPRECATED: Use rebuild_overview_cards() instead
         """
         Single authoritative recompute+render path for all balance and commitment UI.
         - Queries latest account balance and unpaid commitment sum from DB
@@ -2762,6 +2992,15 @@ class DashboardMain(QMainWindow):
         - No partial refresh, no try/except hiding errors
         """
         from database.db_manager import fetch_one
+        # #region agent log
+        import json as _json
+        import time as _time
+        try:
+            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(_json.dumps({"sessionId":"debug-session","runId":"balances-pre-fix","hypothesisId":"H1,H3","location":"dashboard_main.py:update_balance_cards_from_db","message":"update_balance_cards_from_db called","data":{"user_id":getattr(self,'user_id',None)}, "timestamp":int(_time.time()*1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         checking_balance_row = fetch_one("""
             SELECT SUM(
                 CASE 
@@ -2782,6 +3021,13 @@ class DashboardMain(QMainWindow):
             WHERE user_id = ? AND COALESCE(is_paid, 0) = 0
         """, (self.user_id,))
         unpaid_sum = float(unpaid_row["total"] if unpaid_row and unpaid_row["total"] is not None else 0)
+        # #region agent log
+        try:
+            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(_json.dumps({"sessionId":"debug-session","runId":"balances-pre-fix","hypothesisId":"H1,H3","location":"dashboard_main.py:update_balance_cards_from_db","message":"db recompute values","data":{"raw_balance":raw_balance,"unpaid_sum":unpaid_sum,"computed_after":(raw_balance-unpaid_sum)}, "timestamp":int(_time.time()*1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         available_balance = max(0, raw_balance)
         balance_after_commitments = max(0, raw_balance - unpaid_sum)
         user_currency = fetch_one("SELECT currency FROM settings WHERE user_id = ?", (self.user_id,))
@@ -3582,10 +3828,49 @@ class DashboardMain(QMainWindow):
             QMessageBox.warning(self, "Error", f"Failed to set main account: {str(e)}")
 
     def set_as_savings_account(self, account_id):
-        """Set an account as the savings account"""
+        """Set an account as the savings account - ONLY if it's already a savings account from Plaid"""
         try:
+            # #region agent log
+            import json as _json
+            import time as _time
+            try:
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(_json.dumps({"sessionId":"debug-session","runId":"accounts-pre-fix","hypothesisId":"H2","location":"dashboard_main.py:set_as_savings_account","message":"set_as_savings_account called","data":{"account_id":account_id,"user_id":self.user_id}, "timestamp":int(_time.time()*1000)}) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            
             from database.migrations.add_institution_migration import apply_institution_migration
             apply_institution_migration()
+            
+            # Check if account exists and get its current type
+            from database.db_manager import fetch_one
+            account = fetch_one("""
+                SELECT account_id, account_type, bank_name, plaid_token
+                FROM accounts 
+                WHERE account_id = ? AND user_id = ?
+            """, (account_id, self.user_id))
+            
+            if not account:
+                QMessageBox.warning(self, "Error", "Account not found")
+                return
+            
+            # #region agent log
+            try:
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(_json.dumps({"sessionId":"debug-session","runId":"accounts-pre-fix","hypothesisId":"H2","location":"dashboard_main.py:set_as_savings_account","message":"account found before update","data":{"account_id":account_id,"current_type":account.get("account_type",""),"has_plaid_token":bool(account.get("plaid_token"))}, "timestamp":int(_time.time()*1000)}) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            
+            # CRITICAL: Only allow setting as savings if account is already savings type from Plaid
+            # Do NOT convert checking accounts to savings (that would remove checking account)
+            if account.get("account_type") != "savings":
+                QMessageBox.warning(self, "Error", 
+                    f"This account is a {account.get('account_type', 'checking')} account. "
+                    "Only savings accounts from Plaid can be set as savings. "
+                    "Please link a savings account through Plaid.")
+                return
             
             # First, unset all primary savings accounts
             execute_query("""
@@ -3594,12 +3879,20 @@ class DashboardMain(QMainWindow):
                 WHERE user_id = ? AND account_type = 'savings'
             """, (self.user_id,), commit=False)
             
-            # Set this account as primary and ensure it's savings type
+            # Set this account as primary (it's already savings type from Plaid)
             execute_query("""
                 UPDATE accounts 
-                SET is_primary = 1, account_type = 'savings'
+                SET is_primary = 1
                 WHERE account_id = ? AND user_id = ?
             """, (account_id, self.user_id), commit=True)
+            
+            # #region agent log
+            try:
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(_json.dumps({"sessionId":"debug-session","runId":"accounts-pre-fix","hypothesisId":"H2","location":"dashboard_main.py:set_as_savings_account","message":"account updated (preserved type)","data":{"account_id":account_id,"preserved_type":"savings"}, "timestamp":int(_time.time()*1000)}) + "\n")
+            except Exception:
+                pass
+            # #endregion
             
             # Refresh dashboard
             self.refresh_dashboard()
@@ -4289,276 +4582,8 @@ class DashboardMain(QMainWindow):
         self.overview_frame = overview_frame
         self.overview_layout = overview_layout
 
-        try:
-            # Import the required functions
-            from database.db_manager import fetch_all,fetch_one
-            from core.plaid_api import get_account_balances
-
-            # Get REAL checking account balance from Plaid first
-            checking_balance = 0
-            has_plaid_checking = False
-
-            # Get Plaid checking accounts (which are stored as 'salary' type) - ONLY primary
-            plaid_accounts = fetch_all("""
-                SELECT account_id, plaid_token, account_type, bank_name
-                FROM accounts 
-                WHERE user_id = ? 
-                AND account_type = 'salary'
-                AND is_primary = 1
-                AND plaid_token IS NOT NULL
-            """,(self.user_id,))
-
-            if plaid_accounts:
-                has_plaid_checking = True
-                for account in plaid_accounts:
-                    # Priority 1: Use simulated_balance if set (for developer testing)
-                    sim_bal = fetch_one("SELECT simulated_balance FROM accounts WHERE account_id = ?", (account["account_id"],))
-                    if sim_bal and sim_bal["simulated_balance"] is not None:
-                        checking_balance += sim_bal["simulated_balance"]
-                        continue
-                    # Priority 2: Use Plaid API
-                    try:
-                        balances_data = get_account_balances(account["plaid_token"])
-                        # Check if response contains an error
-                        if "error" in balances_data:
-                            logger.warning(f"Plaid balance error for account {account['account_id']}: {balances_data['error']}")
-                            continue
-                        for acc_balance in balances_data.get("accounts",[]):
-                            if acc_balance["account_id"] == account["account_id"]:
-                                balance = acc_balance["balances"].get("available",0)
-                                checking_balance += balance
-                    except Exception as e:
-                        logger.error(f"Error fetching balance for account {account['account_id']}: {e}")
-
-            # If Plaid failed, use transaction-based calculation
-            if not has_plaid_checking or checking_balance == 0:
-                checking_balance_row = fetch_one("""
-                    SELECT SUM(
-                        CASE 
-                            WHEN transaction_type = 'income' THEN amount 
-                            WHEN transaction_type = 'expense' THEN -amount 
-                            ELSE 0 
-                        END
-                    ) as balance
-                    FROM transactions
-                    WHERE user_id = ?
-                """,(self.user_id,))
-                checking_balance = checking_balance_row["balance"] if checking_balance_row and checking_balance_row[
-                    "balance"] is not None else 0
-
-            # Get savings balance - first try Plaid savings accounts, then fallback to transaction-based
-            # ONLY get primary savings account
-            savings = 0
-            plaid_savings_accounts = fetch_all("""
-                SELECT account_id, plaid_token, account_type, bank_name
-                FROM accounts 
-                WHERE user_id = ? 
-                AND account_type = 'savings'
-                AND is_primary = 1
-                AND plaid_token IS NOT NULL
-            """,(self.user_id,))
-            
-            if plaid_savings_accounts:
-                # Get real savings balance from Plaid
-                for account in plaid_savings_accounts:
-                    try:
-                        balances_data = get_account_balances(account["plaid_token"])
-                        if "error" in balances_data:
-                            logger.warning(f"Plaid savings balance error for account {account['account_id']}: {balances_data['error']}")
-                            continue
-                        for acc_balance in balances_data.get("accounts",[]):
-                            if acc_balance["account_id"] == account["account_id"]:
-                                balance = acc_balance["balances"].get("available",0)
-                                savings += balance
-                    except Exception as e:
-                        logger.error(f"Error fetching savings balance for account {account['account_id']}: {e}")
-            
-            # If no Plaid savings accounts, use transaction-based calculation as fallback
-            if not plaid_savings_accounts:
-                savings_row = fetch_one("""
-                    SELECT SUM(amount) AS total
-                    FROM transactions t
-                    JOIN categories c ON t.category_id = c.category_id
-                    WHERE t.user_id = ? AND c.category_name = 'Savings'
-                """,(self.user_id,))
-                # Handle sqlite3.Row object
-                try:
-                    savings = savings_row["total"] if savings_row and "total" in savings_row.keys() and savings_row["total"] is not None else 0
-                except (KeyError, TypeError, AttributeError):
-                    savings = 0
-
-            # Get commitments (unpaid) - handle NULL is_paid values
-            commitments_row = fetch_one("""
-                SELECT COALESCE(SUM(amount), 0) AS total
-                FROM category_commitments
-                WHERE user_id = ? AND COALESCE(is_paid, 0) = 0
-            """,(self.user_id,))
-            # Handle sqlite3.Row object
-            try:
-                commitments = commitments_row["total"] if commitments_row and "total" in commitments_row.keys() and commitments_row["total"] is not None else 0
-            except (KeyError, TypeError, AttributeError):
-                commitments = 0
-
-            # Calculate balances
-            price_after_commitments = checking_balance - commitments  # what's left after paying all unpaid commitments
-            # Cache for signal-driven updates
-            self.current_available_balance = checking_balance
-            self.current_unpaid_commitments_total = commitments
-            self.current_price_after_commitments = price_after_commitments
-            logger.info(
-                f"[overview_cards] user={self.user_id} checking_balance={checking_balance} "
-                f"savings_balance={savings} unpaid_commitments={commitments} "
-                f"price_after_commitments={price_after_commitments}"
-            )
-
-            # Get currency
-            user_currency = fetch_one("SELECT currency FROM settings WHERE user_id = ?",(self.user_id,))
-            # Handle sqlite3.Row object
-            try:
-                currency = user_currency["currency"] if user_currency and "currency" in user_currency.keys() else "USD"
-            except (KeyError, TypeError, AttributeError):
-                currency = "USD"
-            self.current_currency = currency
-
-            # Create the 3 cards - show empty cards with buttons when balance is 0 or no account
-            # Check if accounts exist
-            has_savings_account = fetch_one("""
-                SELECT account_id FROM accounts 
-                WHERE user_id = ? AND account_type = 'savings' AND is_primary = 1
-                LIMIT 1
-            """, (self.user_id,))
-            
-            has_main_account = fetch_one("""
-                SELECT account_id FROM accounts 
-                WHERE user_id = ? AND account_type = 'salary' AND is_primary = 1
-                LIMIT 1
-            """, (self.user_id,))
-            
-            has_savings = has_savings_account is not None
-            has_main = has_main_account is not None
-            
-            # Create cards - show empty cards with buttons when balance is 0 or no account
-            if has_savings and savings > 0:
-                savings_card = self.create_finance_card(
-                    "Savings Balance",
-                    f"{currency} {savings:,.2f}",
-                    theme_color('success'),
-                    "positive"
-                )
-            else:
-                def show_link_bank_savings():
-                    # Find the dashboard window by traversing parent widgets
-                    widget = self
-                    while widget:
-                        if hasattr(widget, 'show_link_bank'):
-                            widget.show_link_bank()
-                            return
-                        widget = widget.parent()
-                    # Fallback: try to find DashboardMain window
-                    from PyQt5.QtWidgets import QApplication
-                    for widget in QApplication.topLevelWidgets():
-                        if hasattr(widget, 'show_link_bank'):
-                            widget.show_link_bank()
-                            return
-                
-                savings_card = self.create_empty_card(
-                    " Savings Balance",
-                    "Add Savings Account",
-                    show_link_bank_savings
-                )
-
-            # Price After Commitments always shows as finance card (even with 0.00)
-            commitments_card = self.create_finance_card(
-                "Balance After Commitments",
-                f"{currency} {price_after_commitments:,.2f}",
-                theme_color('warning'),
-                "warning"
-            )
-            self.commitments_card = commitments_card
-            if hasattr(commitments_card, "value_label"):
-                self.commitments_value_label = commitments_card.value_label
-
-            # Available Balance shows empty card if no account or balance is 0
-            if has_main and checking_balance > 0:
-                available_card = self.create_finance_card(
-                    "Available Balance",
-                    f"{currency} {checking_balance:,.2f}",
-                    theme_color('success'),
-                    "positive"
-                )
-            else:
-                def show_link_bank_main2():
-                    # Find the dashboard window by traversing parent widgets
-                    widget = self
-                    while widget:
-                        if hasattr(widget, 'show_link_bank'):
-                            widget.show_link_bank()
-                            return
-                        widget = widget.parent()
-                    # Fallback: try to find DashboardMain window
-                    from PyQt5.QtWidgets import QApplication
-                    for widget in QApplication.topLevelWidgets():
-                        if hasattr(widget, 'show_link_bank'):
-                            widget.show_link_bank()
-                            return
-                
-                available_card = self.create_empty_card(
-                    "Available Balance",
-                    "Add Bank Account",
-                    show_link_bank_main2
-                )
-
-            # Make Balance After Commitments card 1/8 bigger (160 * 1.125 = 180)
-            commitments_card.setFixedHeight(180)
-            overview_layout.addWidget(savings_card)
-            overview_layout.addWidget(commitments_card)
-            overview_layout.addWidget(available_card)
-
-        except Exception as e:
-            print(f"Error loading financial data: {e}")
-            # Fallback to empty cards with buttons if real data fails
-            def show_link_bank_fallback2():
-                # Find the dashboard window by traversing parent widgets
-                widget = self
-                while widget:
-                    if hasattr(widget, 'show_link_bank'):
-                        widget.show_link_bank()
-                        return
-                    widget = widget.parent()
-                # Fallback: try to find DashboardMain window
-                from PyQt5.QtWidgets import QApplication
-                for widget in QApplication.topLevelWidgets():
-                    if hasattr(widget, 'show_link_bank'):
-                        widget.show_link_bank()
-                        return
-            
-            savings_card = self.create_empty_card(
-                " Savings Balance",
-                "Add Savings Account",
-                show_link_bank_fallback2
-            )
-
-            # Price After Commitments always shows as finance card (even with 0.00)
-            commitments_card = self.create_finance_card(
-                "Balance After Commitments",
-                f"{currency} {price_after_commitments:,.2f}",
-                "#F59E0B",
-                "warning"
-            )
-            self.commitments_card = commitments_card
-            if hasattr(commitments_card, "value_label"):
-                self.commitments_value_label = commitments_card.value_label
-
-            available_card = self.create_empty_card(
-                "Available Balance",
-                "Add Bank Account",
-                show_link_bank_fallback2
-            )
-
-            commitments_card.setFixedHeight(180)
-            overview_layout.addWidget(savings_card)
-            overview_layout.addWidget(commitments_card)
-            overview_layout.addWidget(available_card)
+        # Build cards using shared helper (Plaid only, no simulated/fallback)
+        self._rebuild_cards_in_layout(overview_layout)
 
         if layout:
             layout.addWidget(overview_frame)
@@ -4567,6 +4592,8 @@ class DashboardMain(QMainWindow):
 
     def create_finance_card(self,title,value,color,card_type):
         """Create a clean finance card with visible text"""
+        from core.font_manager import get_font_scale
+        
         card = QFrame()
         p = theme_palette()
         card.setStyleSheet(f"""
@@ -4588,12 +4615,17 @@ class DashboardMain(QMainWindow):
         main_layout.setContentsMargins(30,25,30,25)  # Increased padding
         main_layout.setSpacing(10)
 
+        # Get font scale factor
+        font_scale = get_font_scale()
+        title_font_size = int(16 * font_scale)
+        value_font_size = int(42 * font_scale)
+
         # Title label - make sure it's visible
         title_label = QLabel(title)
         title_label.setStyleSheet(f"""
             QLabel {{
                 color: {theme_color('text_primary')};
-                font-size: 16px;
+                font-size: {title_font_size}px;
                 font-weight: 600;
                 background: transparent;
                 border: none;
@@ -4606,7 +4638,7 @@ class DashboardMain(QMainWindow):
         value_label.setStyleSheet(f"""
             QLabel {{
                 color: {color};
-                font-size: 42px;
+                font-size: {value_font_size}px;
                 font-weight: bold;
                 background: transparent;
                 border: none;

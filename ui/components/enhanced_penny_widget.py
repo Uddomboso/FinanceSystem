@@ -5,12 +5,15 @@ Enhanced Penny Widget with Personality Integration
 """
 
 import random
+import json
 from PyQt5.QtWidgets import (QFrame,QHBoxLayout,QVBoxLayout,QLabel,
                              QPushButton)
 from PyQt5.QtCore import (Qt,QTimer,pyqtSignal,QPropertyAnimation,
                           QEasingCurve,QRect)
 from PyQt5.QtGui import QFont
 from core.penny_personality import PennyPersonality
+from core.ai_suggestions import generate_penny_message
+from core.ai_insights_cache import _get_financial_context
 from .penny_avatar import PennyAvatar
 
 
@@ -68,7 +71,12 @@ class EnhancedPennyWidget(QFrame):
 
         self.message_label = QLabel("💭 Getting to know you...")
         self.message_label.setWordWrap(True)
-        self.message_label.setStyleSheet("color: #1F2937; font-size: 14px; line-height: 1.4;")
+        
+        # Theme-aware message text color
+        from core.theme_manager import theme_manager
+        from assets.styles.penny_colors import PennyColors
+        p = PennyColors.get_palette(theme_manager.current_theme)
+        self.message_label.setStyleSheet(f"color: {p['text_primary']}; font-size: 14px; line-height: 1.4;")
         self.message_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         bubble_layout.addWidget(self.message_label)
@@ -98,33 +106,60 @@ class EnhancedPennyWidget(QFrame):
         self.message_label.setAccessibleDescription("Financial companion advice and tips")
 
     def style_enhanced_buttons(self):
-        """Apply consistent styling to refresh button"""
+        """Apply consistent styling to refresh button with theme support"""
+        from core.theme_manager import theme_manager
+        from assets.styles.penny_colors import PennyColors
+        p = PennyColors.get_palette(theme_manager.current_theme)
+        
         try:
             import qtawesome as qta
-            refresh_icon = qta.icon('fa5s.sync-alt', color='#6B7280')
+            icon_color = p['text_secondary']
+            refresh_icon = qta.icon('fa5s.sync-alt', color=icon_color)
             self.refresh_btn.setIcon(refresh_icon)
         except ImportError:
             # Fallback to text if qtawesome not available
             self.refresh_btn.setText("↻")
         
-        button_style = """
-            QPushButton {
-                background: rgba(255, 255, 255, 0.9);
-                border: 1px solid rgba(0, 0, 0, 0.1);
-                border-radius: 16px;
-                padding: 0px;
-                font-size: 14px;
-                color: #6B7280;
-            }
-            QPushButton:hover {
-                background: rgba(255, 255, 255, 1);
-                border-color: rgba(37, 99, 235, 0.3);
-                color: #2563EB;
-            }
-            QPushButton:pressed {
-                background: rgba(240, 240, 240, 1);
-            }
-        """
+        if theme_manager.current_theme == "dark":
+            # Dark mode: subtle button
+            button_style = f"""
+                QPushButton {{
+                    background: rgba(19, 47, 58, 0.8);
+                    border: 1px solid rgba(30, 122, 157, 0.3);
+                    border-radius: 16px;
+                    padding: 0px;
+                    font-size: 14px;
+                    color: {p['text_secondary']};
+                }}
+                QPushButton:hover {{
+                    background: rgba(19, 47, 58, 1);
+                    border-color: {p['ai_accent']};
+                    color: {p['accent']};
+                }}
+                QPushButton:pressed {{
+                    background: rgba(16, 42, 51, 1);
+                }}
+            """
+        else:
+            # Light mode: original style
+            button_style = """
+                QPushButton {
+                    background: rgba(255, 255, 255, 0.9);
+                    border: 1px solid rgba(0, 0, 0, 0.1);
+                    border-radius: 16px;
+                    padding: 0px;
+                    font-size: 14px;
+                    color: #6B7280;
+                }
+                QPushButton:hover {
+                    background: rgba(255, 255, 255, 1);
+                    border-color: rgba(37, 99, 235, 0.3);
+                    color: #2563EB;
+                }
+                QPushButton:pressed {
+                    background: rgba(240, 240, 240, 1);
+                }
+            """
         self.refresh_btn.setStyleSheet(button_style)
 
     def setup_personality_timers(self):
@@ -150,16 +185,36 @@ class EnhancedPennyWidget(QFrame):
     def send_proactive_tip(self):
         """Send proactive financial tip (with randomness)"""
         if self.should_send_proactive_tip() and random.random() < 0.3:  # 30% chance
-            tips = [
-                "Consider reviewing your subscriptions - you might find some unused ones!",
-                "Round up your purchases and save the difference automatically!",
-                "Set a weekly spending limit to track expenses better!",
-                "Review your budget weekly to stay on track with financial goals!",
-                "Small daily savings habits lead to big financial wins!"
-            ]
-            tip_data = {'tip': random.choice(tips)}
-            message,tone = self.personality.get_contextual_response('financial_tip',tip_data)
-            self.update_message(message,tone)
+            # #region agent log
+            try:
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"A","location":"enhanced_penny_widget.py:send_proactive_tip","message":"Proactive tip triggered","data":{"user_id":self.user_id},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+            except: pass
+            # #endregion
+            
+            financial_context = _get_financial_context(self.user_id)
+            result = generate_penny_message(financial_context)
+            
+            # Use expression for avatar visual display (not mood)
+            expression = result.get('expression', 'neutral')
+            # Keep tone mapping for backward compatibility with styling
+            mood_to_tone = {
+                'excellent': 'positive',
+                'good': 'positive',
+                'neutral': 'friendly',
+                'concerned': 'warning',
+                'needs_attention': 'alert'
+            }
+            tone = mood_to_tone.get(result['mood'], 'friendly')
+            
+            # #region agent log
+            try:
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"A","location":"enhanced_penny_widget.py:send_proactive_tip","message":"New pipeline result","data":{"mood":result['mood'],"expression":expression,"tone":tone,"message_preview":result['message'][:50]},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+            except: pass
+            # #endregion
+            
+            self.update_message(result['message'], tone, expression)
 
     def should_send_proactive_tip(self):
         """Determine if we should send a proactive tip"""
@@ -189,12 +244,13 @@ class EnhancedPennyWidget(QFrame):
 
         return "stable"
 
-    def update_message(self,message,tone="friendly"):
+    def update_message(self,message,tone="friendly",expression=None):
         """Enhanced message update with personality"""
         try:
             if not message or not isinstance(message,str):
                 message = "I'm here to help with your financial journey! 💫"
                 tone = "friendly"
+                expression = "neutral"
 
             self.current_tone = tone
             self.message_history.append((message,tone))
@@ -212,9 +268,10 @@ class EnhancedPennyWidget(QFrame):
             self.message_label.setText(message)
             self.apply_tone_styling(tone)
 
-            # Update avatar based on tone
+            # Update avatar based on expression (not mood/tone)
             if hasattr(self,'avatar'):
-                self.avatar.update_emotional_state(tone)
+                avatar_expression = expression if expression else tone
+                self.avatar.update_emotional_state(avatar_expression)
 
             # Emit signal for other components
             self.message_updated.emit(message,tone)
@@ -263,22 +320,42 @@ class EnhancedPennyWidget(QFrame):
         self.update_message(message,tone)
 
     def apply_styling(self):
-        """Apply Penny's special styling"""
-        self.setStyleSheet("""
-            QFrame[class="penny_widget"] {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 rgba(254, 243, 199, 0.3), 
-                    stop:1 rgba(253, 230, 138, 0.3));
-                border: 1px solid rgba(245, 158, 11, 0.2);
-                border-radius: 20px;
-            }
-            QFrame[class="penny_bubble"] {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #FEF3C7, stop:1 #FDE68A);
-                border-left: 4px solid #F59E0B;
-                border-radius: 12px;
-            }
-        """)
+        """Apply Penny's special styling with theme support"""
+        from core.theme_manager import theme_manager
+        from assets.styles.penny_colors import PennyColors
+        
+        if theme_manager.current_theme == "dark":
+            # Dark mode: subtle, muted penny area
+            p = PennyColors.get_palette("dark")
+            self.setStyleSheet(f"""
+                QFrame[class="penny_widget"] {{
+                    background: {p['ai_bg']};
+                    border: 1px solid rgba(30, 122, 157, 0.3);
+                    border-radius: 20px;
+                }}
+                QFrame[class="penny_bubble"] {{
+                    background: {p['surface']};
+                    border-left: 3px solid {p['ai_accent']};
+                    border-radius: 12px;
+                }}
+            """)
+        else:
+            # Light mode: original bright colors
+            self.setStyleSheet("""
+                QFrame[class="penny_widget"] {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                        stop:0 rgba(254, 243, 199, 0.3), 
+                        stop:1 rgba(253, 230, 138, 0.3));
+                    border: 1px solid rgba(245, 158, 11, 0.2);
+                    border-radius: 20px;
+                }
+                QFrame[class="penny_bubble"] {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                        stop:0 #FEF3C7, stop:1 #FDE68A);
+                    border-left: 4px solid #F59E0B;
+                    border-radius: 12px;
+                }
+            """)
 
     def setup_animations(self):
         """Setup entrance and interaction animations"""
@@ -300,30 +377,58 @@ class EnhancedPennyWidget(QFrame):
         self.entrance_animation.start()
 
     def apply_tone_styling(self,tone):
-        """Apply tone-specific styling to the bubble"""
-        tone_colors = {
-            "friendly": ("#FEF3C7","#FDE68A","#F59E0B"),
-            "positive": ("#D1FAE5","#A7F3D0","#10B981"),
-            "encouraging": ("#DBEAFE","#93C5FD","#2563EB"),
-            "warning": ("#FEF3C7","#FDE68A","#F59E0B"),
-            "alert": ("#FEE2E2","#FCA5A5","#DC2626"),
-            "excited": ("#FEF3C7","#FDE68A","#F59E0B"),
-            "supportive": ("#DBEAFE","#93C5FD","#2563EB"),
-            "calm": ("#F0FDF4","#BBF7D0","#22C55E")
-        }
+        """Apply tone-specific styling to the bubble with theme support"""
+        from core.theme_manager import theme_manager
+        from assets.styles.penny_colors import PennyColors
+        
+        if theme_manager.current_theme == "dark":
+            # Dark mode: subtle tone colors with reduced contrast
+            p = PennyColors.get_palette("dark")
+            tone_colors_dark = {
+                "friendly": (p['surface'], "#1e7a9d"),
+                "positive": (p['surface'], "#2ba878"),
+                "encouraging": (p['surface'], "#2596be"),
+                "warning": (p['surface'], "#d89b3a"),
+                "alert": (p['surface'], "#e57373"),
+                "excited": (p['surface'], "#2596be"),
+                "supportive": (p['surface'], "#2596be"),
+                "calm": (p['surface'], "#2ba878")
+            }
+            
+            bg_color, border_color = tone_colors_dark.get(tone, tone_colors_dark["friendly"])
+            
+            self.bubble_frame.setStyleSheet(f"""
+                QFrame[class="penny_bubble"] {{
+                    background: {bg_color};
+                    border-left: 3px solid {border_color};
+                    border-radius: 12px;
+                }}
+            """)
+        else:
+            # Light mode: original bright colors
+            tone_colors = {
+                "friendly": ("#FEF3C7","#FDE68A","#F59E0B"),
+                "positive": ("#D1FAE5","#A7F3D0","#10B981"),
+                "encouraging": ("#DBEAFE","#93C5FD","#2563EB"),
+                "warning": ("#FEF3C7","#FDE68A","#F59E0B"),
+                "alert": ("#FEE2E2","#FCA5A5","#DC2626"),
+                "excited": ("#FEF3C7","#FDE68A","#F59E0B"),
+                "supportive": ("#DBEAFE","#93C5FD","#2563EB"),
+                "calm": ("#F0FDF4","#BBF7D0","#22C55E")
+            }
 
-        start_color,end_color,border_color = tone_colors.get(
-            tone,tone_colors["friendly"]
-        )
+            start_color,end_color,border_color = tone_colors.get(
+                tone,tone_colors["friendly"]
+            )
 
-        self.bubble_frame.setStyleSheet(f"""
-            QFrame[class="penny_bubble"] {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {start_color}, stop:1 {end_color});
-                border-left: 4px solid {border_color};
-                border-radius: 12px;
-            }}
-        """)
+            self.bubble_frame.setStyleSheet(f"""
+                QFrame[class="penny_bubble"] {{
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                        stop:0 {start_color}, stop:1 {end_color});
+                    border-left: 4px solid {border_color};
+                    border-radius: 12px;
+                }}
+            """)
 
     def animate_bubble(self):
         """Animate the speech bubble for emphasis"""
@@ -348,25 +453,43 @@ class EnhancedPennyWidget(QFrame):
 
     def request_new_tip(self):
         """Request a new AI tip"""
-        print("🔄 New tip requested - would trigger AI service")
-        # This would connect to the AI service in the full implementation
+        # #region agent log
+        try:
+            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"B","location":"enhanced_penny_widget.py:request_new_tip","message":"New tip requested","data":{"user_id":self.user_id},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+        except: pass
+        # #endregion
+        
         self.update_message("💡 Let me think of something fresh for you...","friendly")
 
-        # Simulate AI thinking delay
-        QTimer.singleShot(1500,self._simulate_new_tip)
+        # Use real AI service with delay
+        QTimer.singleShot(1500,self._fetch_new_tip)
 
-    def _simulate_new_tip(self):
-        """Simulate getting a new AI tip"""
-        demo_tips = [
-            ("I suggest reviewing your weekly spending to find saving opportunities!","friendly"),
-            ("Great job staying within budget this week! 🎉","positive"),
-            ("Let's set up automatic savings for your next paycheck!","encouraging"),
-            ("Watch out for dining out expenses this month.","warning"),
-            ("Your savings are growing steadily! Keep it up! 📈","positive")
-        ]
-
-        tip,tone = random.choice(demo_tips)
-        self.update_message(tip,tone)
+    def _fetch_new_tip(self):
+        """Fetch new tip from generate_penny_message pipeline"""
+        financial_context = _get_financial_context(self.user_id)
+        result = generate_penny_message(financial_context)
+        
+        # Use expression for avatar visual display (not mood)
+        expression = result.get('expression', 'neutral')
+        # Keep tone mapping for backward compatibility with styling
+        mood_to_tone = {
+            'excellent': 'positive',
+            'good': 'positive',
+            'neutral': 'friendly',
+            'concerned': 'warning',
+            'needs_attention': 'alert'
+        }
+        tone = mood_to_tone.get(result['mood'], 'friendly')
+        
+        # #region agent log
+        try:
+            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"B","location":"enhanced_penny_widget.py:_fetch_new_tip","message":"New pipeline result","data":{"mood":result['mood'],"expression":expression,"tone":tone,"message_preview":result['message'][:50]},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+        except: pass
+        # #endregion
+        
+        self.update_message(result['message'], tone, expression)
 
     def get_current_message(self):
         """Get Penny's current message"""

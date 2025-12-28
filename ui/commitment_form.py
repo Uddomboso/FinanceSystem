@@ -519,6 +519,15 @@ class CommitmentForm(QDialog):
 
     def save_commitment(self):
         """Save commitment based on selected payment detection method"""
+        # #region agent log
+        import json as _json
+        import time as _time
+        try:
+            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(_json.dumps({"sessionId":"debug-session","runId":"balances-pre-fix","hypothesisId":"H4","location":"commitment_form.py:save_commitment","message":"save_commitment invoked","data":{"user_id":getattr(self,'user_id',None)}, "timestamp":int(_time.time()*1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         try:
             # Validate inputs
             name = self.name_input.text().strip()
@@ -628,12 +637,13 @@ class CommitmentForm(QDialog):
                         VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
                     """, (self.user_id, cat_id, amount, due_day, detection_method, bank_name, account_number), commit=True)
                     
-                    # Final refresh to sync everything
+                    # Final refresh to sync everything - rebuild balance cards immediately
                     if self.parent_dashboard:
                         if hasattr(self.parent_dashboard, 'commitment_tracker'):
                             self.parent_dashboard.commitment_tracker.load_commitments()
-                        if hasattr(self.parent_dashboard, 'refresh_metrics_cards_main'):
-                            self.parent_dashboard.refresh_metrics_cards_main()
+                        # Rebuild balance cards with fresh Plaid data and updated commitments
+                        if hasattr(self.parent_dashboard, 'rebuild_overview_cards'):
+                            self.parent_dashboard.rebuild_overview_cards()
                         self.parent_dashboard.refresh_dashboard()
                 except Exception as e:
                     print(f"Error saving commitment background: {e}")

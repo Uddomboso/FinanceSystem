@@ -19,33 +19,28 @@ class BankConnectWindow(QWidget):
         self.user_id = user_id
         self.parent_dashboard = parent
         self.setWindowTitle("Link Bank Account")
-        self.setMinimumSize(800,600)
+        self.setMinimumSize(900,700)
+        # Make window fill more screen space for better presentation
+        self.showMaximized()
         self.flask_server = None
         self.flask_thread = None
         self.flask_running = False
         self.flask_port = None
 
         self.layout = QVBoxLayout()
+        self.layout.setContentsMargins(0, 0, 0, 0)  # Remove margins for full screen
+        self.layout.setSpacing(0)  # Remove spacing between widgets
         self.setLayout(self.layout)
 
-        self.status_label = QLabel("🔐 Initializing secure Plaid sandbox session...")
-        self.layout.addWidget(self.status_label)
+        # Hidden status label for internal use (not displayed)
+        self.status_label = QLabel("")
+        self.status_label.hide()
 
-        self.instructions = QLabel("""
-        <b>Use these test credentials:</b><br>
-        • Username: <code>user_good</code><br>
-        • Password: <code>pass_good</code><br>
-        <i>No phone number required. If prompted, click "Continue as guest".</i>
-        """)
-        self.instructions.setStyleSheet("""
-            background: #fff3cd; 
-            padding: 12px; 
-            border-radius: 8px; 
-            color: #856404;
-        """)
-        self.instructions.setWordWrap(True)
-        self.layout.addWidget(self.instructions)
+        # Hidden instructions (test credentials info removed from UI)
+        self.instructions = QLabel("")
+        self.instructions.hide()
 
+        # Web view fills entire window
         self.web_view = QWebEngineView()
         self.layout.addWidget(self.web_view)
 
@@ -112,8 +107,7 @@ class BankConnectWindow(QWidget):
             if "error" in token_response or "access_token" not in token_response:
                 error_msg = token_response.get("error","Unknown error")
                 print(f"[ERROR] Token exchange failed: {error_msg}")
-                self.status_label.setText("❌ Failed to exchange token.")
-                QMessageBox.critical(self,"Error",error_msg)
+                QMessageBox.critical(self,"Error",f"Failed to exchange token: {error_msg}")
                 return
 
             access_token = token_response["access_token"]
@@ -130,13 +124,12 @@ class BankConnectWindow(QWidget):
         response = create_link_token(self.user_id)
 
         if "error" in response:
-            self.status_label.setText("❌ Error creating link token.")
-            QMessageBox.critical(self,"Plaid Error",response["error"])
+            QMessageBox.critical(self,"Plaid Error",f"Error creating link token: {response['error']}")
             return
 
         token = response.get("link_token")
         if not token:
-            self.status_label.setText("❌ No link token received.")
+            QMessageBox.critical(self,"Plaid Error","No link token received from Plaid.")
             return
 
         html = f"""
@@ -197,6 +190,18 @@ class BankConnectWindow(QWidget):
         print(f"[DEBUG] Processing accounts for user_id: {self.user_id}")
         print(f"[DEBUG] Found {len(accounts_data.get('accounts', []))} accounts to process")
         
+        # #region agent log
+        import json as _json
+        import time as _time
+        try:
+            all_accounts = accounts_data.get('accounts', [])
+            account_summary = [{"account_id": acc.get("account_id", ""), "name": acc.get("name", ""), "subtype": acc.get("subtype", ""), "type": acc.get("type", "")} for acc in all_accounts]
+            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(_json.dumps({"sessionId":"debug-session","runId":"accounts-pre-fix","hypothesisId":"H1,H3","location":"bank_connect_window.py:process_accounts","message":"Plaid accounts received","data":{"user_id":self.user_id,"total_accounts":len(all_accounts),"accounts":account_summary}, "timestamp":int(_time.time()*1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
+        
         # Extract institution information from Plaid response
         # The response includes an 'item' object with institution_id
         institution_id = None
@@ -245,18 +250,48 @@ class BankConnectWindow(QWidget):
         from database.migrations.add_institution_migration import apply_institution_migration
         apply_institution_migration()
         
-        # Filter accounts: save main checking account, exclude business/cd accounts
-        # We only save the main checking account (not business, savings sub-accounts, cd, etc.)
+        # Filter accounts: save ALL relevant accounts from Plaid (checking AND savings)
+        # Exclude only business/cd accounts, but include both checking and savings
         main_checking = None
+        main_savings = None
+        
+        # #region agent log
+        import json as _json
+        import time as _time
+        filtered_accounts = []
+        # #endregion
+        
         for acc in accounts_data.get("accounts",[]):
             subtype = acc.get("subtype","").lower()
             
-            # Only include checking accounts (not business, cd, etc.)
-            # We want the main plaid checking account only
+            # #region agent log
+            try:
+                filtered_accounts.append({"account_id": acc.get("account_id", ""), "subtype": subtype, "filtered_out": False})
+            except Exception:
+                pass
+            # #endregion
+            
+            # Include checking accounts (not business)
             if "checking" in subtype and "business" not in subtype:
                 if main_checking is None:
                     main_checking = acc
-                    break
+                    # #region agent log
+                    try:
+                        filtered_accounts[-1]["selected_as"] = "checking"
+                    except Exception:
+                        pass
+                    # #endregion
+            
+            # Include savings accounts (not business)
+            if "savings" in subtype and "business" not in subtype:
+                if main_savings is None:
+                    main_savings = acc
+                    # #region agent log
+                    try:
+                        filtered_accounts[-1]["selected_as"] = "savings"
+                    except Exception:
+                        pass
+                    # #endregion
         
         # If no checking account found, look for any non-business account as fallback
         if main_checking is None:
@@ -266,47 +301,110 @@ class BankConnectWindow(QWidget):
                     main_checking = acc
                     break
         
-        # Save only the main checking account
+        # #region agent log
+        try:
+            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(_json.dumps({"sessionId":"debug-session","runId":"accounts-pre-fix","hypothesisId":"H1,H3","location":"bank_connect_window.py:process_accounts","message":"account filtering result","data":{"main_checking":main_checking.get("account_id","") if main_checking else None,"main_savings":main_savings.get("account_id","") if main_savings else None,"filtered_accounts":filtered_accounts}, "timestamp":int(_time.time()*1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
+        
+        # Save checking AND savings accounts from Plaid
         def save_account(acc, acc_type):
             nonlocal saved_count
             # Check if account already exists for this user
             existing = fetch_one("""
-                SELECT id FROM accounts 
+                SELECT id, account_type, is_primary FROM accounts 
                 WHERE account_id = ? AND user_id = ?
             """, (acc["account_id"], self.user_id))
             
+            # #region agent log
+            import json as _json
+            import time as _time
+            try:
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(_json.dumps({"sessionId":"debug-session","runId":"accounts-pre-fix","hypothesisId":"H1,H3,H4","location":"bank_connect_window.py:save_account","message":"save_account called","data":{"account_id":acc.get("account_id",""),"account_type":acc_type,"existing":bool(existing),"existing_type":existing.get("account_type","") if existing else None,"existing_is_primary":existing.get("is_primary",0) if existing else None}, "timestamp":int(_time.time()*1000)}) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            
             try:
                 if existing:
-                    # Update existing account
-                    print(f"[DEBUG] Updating existing account: {acc.get('name', 'Unknown')} (ID: {acc['account_id']})")
-                    q = """
-                    UPDATE accounts SET
-                        bank_name = ?, account_type = ?, 
-                        currency = ?, plaid_token = ?, last_sync = ?,
-                        institution_id = ?, institution_name = ?, institution_logo = ?
-                    WHERE account_id = ? AND user_id = ?
-                    """
-                    execute_query(q,(
-                        acc.get("name","Unknown Bank"),
-                        acc_type,
-                        acc.get("balances",{}).get("iso_currency_code","USD"),
-                        access_token,
-                        datetime.datetime.now().isoformat(),
-                        institution_id,
-                        institution_name,
-                        institution_logo,
-                        acc["account_id"],
-                        self.user_id
-                    ),commit=True)
+                    # CRITICAL: Preserve existing account_type and is_primary - only update metadata
+                    # Do NOT overwrite account_type (it may have been manually set)
+                    # Only update if account_type matches (to prevent overwriting checking with savings or vice versa)
+                    existing_type = existing.get("account_type", "")
+                    existing_is_primary = existing.get("is_primary", 0) or 0
+                    
+                    if existing_type != acc_type:
+                        print(f"[WARNING] Account {acc.get('account_id')} exists as {existing_type} but Plaid says {acc_type}. Preserving existing type.")
+                        # #region agent log
+                        try:
+                            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                                f.write(_json.dumps({"sessionId":"debug-session","runId":"accounts-pre-fix","hypothesisId":"H4","location":"bank_connect_window.py:save_account","message":"preserving existing account type","data":{"account_id":acc.get("account_id",""),"existing_type":existing_type,"plaid_type":acc_type}, "timestamp":int(_time.time()*1000)}) + "\n")
+                        except Exception:
+                            pass
+                        # #endregion
+                        # Update metadata but preserve type
+                        q = """
+                        UPDATE accounts SET
+                            bank_name = ?, 
+                            currency = ?, plaid_token = ?, last_sync = ?,
+                            institution_id = ?, institution_name = ?, institution_logo = ?
+                        WHERE account_id = ? AND user_id = ?
+                        """
+                        execute_query(q,(
+                            acc.get("name","Unknown Bank"),
+                            acc.get("balances",{}).get("iso_currency_code","USD"),
+                            access_token,
+                            datetime.datetime.now().isoformat(),
+                            institution_id,
+                            institution_name,
+                            institution_logo,
+                            acc["account_id"],
+                            self.user_id
+                        ),commit=True)
+                    else:
+                        # Update existing account (type matches, safe to update)
+                        print(f"[DEBUG] Updating existing account: {acc.get('name', 'Unknown')} (ID: {acc['account_id']})")
+                        q = """
+                        UPDATE accounts SET
+                            bank_name = ?, account_type = ?, 
+                            currency = ?, plaid_token = ?, last_sync = ?,
+                            institution_id = ?, institution_name = ?, institution_logo = ?,
+                            is_primary = COALESCE(is_primary, ?)
+                        WHERE account_id = ? AND user_id = ?
+                        """
+                        execute_query(q,(
+                            acc.get("name","Unknown Bank"),
+                            acc_type,
+                            acc.get("balances",{}).get("iso_currency_code","USD"),
+                            access_token,
+                            datetime.datetime.now().isoformat(),
+                            institution_id,
+                            institution_name,
+                            institution_logo,
+                            existing_is_primary,  # Preserve existing is_primary
+                            acc["account_id"],
+                            self.user_id
+                        ),commit=True)
                     saved_count += 1
                 else:
-                    # Insert new account
-                    print(f"[DEBUG] Inserting new account: {acc.get('name', 'Unknown')} (ID: {acc['account_id']}) for user {self.user_id}")
+                    # Insert new account - set is_primary=1 for first account of each type
+                    # Check if this is the first account of this type
+                    first_of_type = fetch_one("""
+                        SELECT COUNT(*) as count FROM accounts 
+                        WHERE user_id = ? AND account_type = ?
+                    """, (self.user_id, acc_type))
+                    
+                    is_primary = 1 if (first_of_type and first_of_type.get("count", 0) == 0) else 0
+                    
+                    print(f"[DEBUG] Inserting new account: {acc.get('name', 'Unknown')} (ID: {acc['account_id']}) for user {self.user_id}, type={acc_type}, is_primary={is_primary}")
                     q = """
                     INSERT INTO accounts (
                         account_id, user_id, bank_name, account_type, 
-                        currency, plaid_token, last_sync, institution_id, institution_name, institution_logo
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        currency, plaid_token, last_sync, institution_id, institution_name, institution_logo, is_primary
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                     execute_query(q,(
                         acc["account_id"],
@@ -318,7 +416,8 @@ class BankConnectWindow(QWidget):
                         datetime.datetime.now().isoformat(),
                         institution_id,
                         institution_name,
-                        institution_logo
+                        institution_logo,
+                        is_primary
                     ),commit=True)
                     saved_count += 1
             except Exception as e:
@@ -329,8 +428,28 @@ class BankConnectWindow(QWidget):
         if main_checking:
             # Save as salary type (checking/main account)
             save_account(main_checking, "salary")
+            # #region agent log
+            try:
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(_json.dumps({"sessionId":"debug-session","runId":"accounts-pre-fix","hypothesisId":"H1,H3","location":"bank_connect_window.py:process_accounts","message":"saving checking account","data":{"account_id":main_checking.get("account_id",""),"account_type":"salary"}, "timestamp":int(_time.time()*1000)}) + "\n")
+            except Exception:
+                pass
+            # #endregion
         else:
             print(f"[WARNING] No main checking account found in Plaid response")
+        
+        if main_savings:
+            # Save as savings type (detected from Plaid subtype)
+            save_account(main_savings, "savings")
+            # #region agent log
+            try:
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(_json.dumps({"sessionId":"debug-session","runId":"accounts-pre-fix","hypothesisId":"H1,H3","location":"bank_connect_window.py:process_accounts","message":"saving savings account","data":{"account_id":main_savings.get("account_id",""),"account_type":"savings"}, "timestamp":int(_time.time()*1000)}) + "\n")
+            except Exception:
+                pass
+            # #endregion
+        else:
+            print(f"[DEBUG] No savings account found in Plaid response")
         
         print(f"[DEBUG] Successfully saved {saved_count} accounts for user {self.user_id}")
 
@@ -367,7 +486,9 @@ class BankConnectWindow(QWidget):
                 QTimer.singleShot(1000, lambda: self.parent_dashboard.refresh_accounts_page())
 
     def display_accounts(self,accounts_data):
+        # Keep status label hidden (it's not displayed in UI)
         self.status_label.setText("✅ Accounts linked successfully")
+        self.status_label.hide()
         self.web_view.hide()
         self.refresh_btn.show()
 

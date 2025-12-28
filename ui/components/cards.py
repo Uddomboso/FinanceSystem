@@ -5,6 +5,7 @@ Card Widget Component
 from PyQt5.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel
 from PyQt5.QtCore import Qt, pyqtProperty
 from PyQt5.QtGui import QFont
+from core.font_manager import get_font_scale
 
 class CardWidget(QFrame):
     """Reusable card component with consistent styling"""
@@ -33,13 +34,35 @@ class CardWidget(QFrame):
             if self.title:
                 self.title_label = QLabel(self.title)
                 self.title_label.setProperty("class", "card-title")
-                self.title_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
+                # #region agent log
+                import json
+                from datetime import datetime
+                try:
+                    scale = get_font_scale()
+                    scaled_size = int(16 * scale)
+                    with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                        f.write(json.dumps({"location":"cards.py:36","message":"CardWidget title font set SCALED","data":{"title":self.title,"base_size":16,"scale":scale,"scaled_size":scaled_size},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+'\n')
+                except: pass
+                # #endregion
+                # Scale font based on current font size setting
+                scaled_title_size = int(16 * get_font_scale())
+                self.title_label.setFont(QFont("Segoe UI", scaled_title_size, QFont.Bold))
                 header_layout.addWidget(self.title_label)
             
             if self.subtitle:
                 self.subtitle_label = QLabel(self.subtitle)
                 self.subtitle_label.setProperty("class", "card-subtitle")
-                self.subtitle_label.setFont(QFont("Segoe UI", 12))
+                # #region agent log
+                try:
+                    scale = get_font_scale()
+                    scaled_size = int(12 * scale)
+                    with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                        f.write(json.dumps({"location":"cards.py:51","message":"CardWidget subtitle font set SCALED","data":{"subtitle":self.subtitle,"base_size":12,"scale":scale,"scaled_size":scaled_size},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+'\n')
+                except: pass
+                # #endregion
+                # Scale font based on current font size setting
+                scaled_subtitle_size = int(12 * get_font_scale())
+                self.subtitle_label.setFont(QFont("Segoe UI", scaled_subtitle_size))
                 self.subtitle_label.setStyleSheet("color: #6B7280;")
                 header_layout.addWidget(self.subtitle_label)
             

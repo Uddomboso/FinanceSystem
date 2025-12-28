@@ -380,18 +380,7 @@ class TransactionForm(QWidget):
             recur = int(self.recurring.isChecked())
             add_txn(self.user_id, acc_id, cat_id, amt, tx_type, description, now, recur)
             
-            # Update simulated_balance for developer testing
-            # In production, Stripe/Plaid handles real balance changes
-            if tx_type == "expense":
-                execute_query("""
-                    UPDATE accounts SET simulated_balance = simulated_balance - ?
-                    WHERE id = ? AND simulated_balance IS NOT NULL
-                """, (amt, acc_id), commit=True)
-            elif tx_type == "income":
-                execute_query("""
-                    UPDATE accounts SET simulated_balance = simulated_balance + ?
-                    WHERE id = ? AND simulated_balance IS NOT NULL
-                """, (amt, acc_id), commit=True)
+            # REMOVED: simulated_balance logic - Plaid is the only source of truth for balances
             
             # Mark commitment as paid - Priority 1: If "Pay Now" was used (pending_commitment_id exists)
             # Priority 2: Try automatic matching

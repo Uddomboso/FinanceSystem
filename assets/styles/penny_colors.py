@@ -16,13 +16,13 @@ class PennyColors:
     TEXT_PRIMARY = "#1F2937"
     TEXT_SECONDARY = "#6B7280"
     
-    # Neutral Colors (Dark) — refined
+    # Neutral Colors (Dark) — refined for readability
     BACKGROUND_DARK = "#0b1f26"        # main app bg
     SURFACE_DARK = "#132f3a"           # cards
     SURFACE_ALT_DARK = "#102a33"       # sections / rows
-    TEXT_PRIMARY_DARK = "#e6f2f6"      # headings / main text
-    TEXT_SECONDARY_DARK = "#b7d4df"    # labels / meta
-    TEXT_MUTED_DARK = "#8fb3c1"        # muted
+    TEXT_PRIMARY_DARK = "#d4e4ea"      # headings / main text (softer off-white)
+    TEXT_SECONDARY_DARK = "#9db9c8"    # labels / meta (muted gray-blue)
+    TEXT_MUTED_DARK = "#6b8896"        # tertiary text (low-contrast gray)
     
     # Semantic Colors
     SUCCESS = "#22C55E"
@@ -47,9 +47,9 @@ class PennyColors:
     HIGHLIGHT_BG_ORANGE = "rgba(245, 158, 11, 0.05)"
     HIGHLIGHT_BG_GREEN = "rgba(34, 197, 94, 0.05)"
     MUTED_LILAC = "#D7C6E6"
-    # Penny's Special Colors (Dark-safe)
+    # Penny's Special Colors (Dark-safe, improved readability)
     PENNY_VOICE = "#1a3b46"            # ai banner bg (dark)
-    PENNY_BORDER = "#2596be"           # ai accent line
+    PENNY_BORDER = "#1e7a9d"           # ai accent line (subtler)
     PENNY_AVATAR = "#2596be"           # ai icon bg
     COMMITMENT_BG = "#183843"
     COMMITMENT_BORDER = "#245160"
@@ -127,7 +127,7 @@ class PennyColors:
         "muted": "#9CA3AF",
     }
     
-    # Dark — fully aligned with PennyWise dark UI
+    # Dark — improved contrast and readability
     DARK = {
         "background": BACKGROUND_DARK,
         "surface": SURFACE_DARK,
@@ -136,11 +136,11 @@ class PennyColors:
         "text_secondary": TEXT_SECONDARY_DARK,
         "border": DARK_TEAL_BORDER,
         "primary": "#2596be",
-        "secondary": "#27c084",
+        "secondary": "#2ba878",           # softer green
         "accent": "#2596be",
-        "success": "#27c084",
-        "warning": "#f6a21a",
-        "error": "#ff5c5c",
+        "success": "#2ba878",             # toned down green
+        "warning": "#d89b3a",             # softer yellow/amber
+        "error": "#e57373",               # softer red
         "info": "#2596be",
         "muted": TEXT_MUTED_DARK,
         "row_bg": SURFACE_ALT_DARK,
@@ -150,7 +150,7 @@ class PennyColors:
         "commitment_bg": COMMITMENT_BG,
         "commitment_border": COMMITMENT_BORDER,
         "ai_bg": PENNY_VOICE,
-        "ai_accent": PENNY_BORDER,
+        "ai_accent": "#1e7a9d",           # subtler penny accent
     }
     
     @classmethod

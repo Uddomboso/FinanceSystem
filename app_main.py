@@ -191,6 +191,23 @@ class PennyWiseApp:
         except Exception as e:
             logger.warning(f"Could not apply user theme preference, keeping current theme: {e}")
 
+        # Apply font size preference
+        try:
+            from core.font_manager import apply_font_size
+            from database.db_manager import fetch_one
+            settings = fetch_one("SELECT font_family FROM settings WHERE user_id = ?", (self.user_id,))
+            if settings and 'font_family' in settings.keys():
+                font_size = settings['font_family']
+                # Map old values to new size labels
+                if font_size in ["Small", "Medium", "Large"]:
+                    apply_font_size(font_size)
+                else:
+                    apply_font_size("Medium")
+            else:
+                apply_font_size("Medium")
+        except Exception as e:
+            logger.warning(f"Could not apply font size preference: {e}")
+
         try:
             # Import and create the new dashboard
             from ui.dashboard_main import DashboardMain
