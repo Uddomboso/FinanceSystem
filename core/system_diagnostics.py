@@ -301,3 +301,4 @@ def get_diagnostics() -> SystemDiagnostics:
         _diagnostics = SystemDiagnostics()
     return _diagnostics
 
+
