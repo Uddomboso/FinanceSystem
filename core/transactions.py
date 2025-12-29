@@ -31,6 +31,13 @@ def add_txn(user_id,acc_id,cat_id,amt,tx_type,note,date,recurring):
     '''
     p = (user_id,acc_id,cat_id,amt,tx_type,note,date,recurring)
     execute_query(q,p,commit=True)
+    
+    # Log transaction creation
+    try:
+        from core.system_logger import log_info
+        log_info("Transaction Created", user_id, f"{tx_type.capitalize()} of ${amt:.2f} - {note or 'No description'}")
+    except Exception:
+        pass  # Fail silently if logging unavailable
 
 
 def get_all_txns(user_id):
@@ -432,4 +439,3 @@ def insert_simulated_transaction(user_id, merchant_name, amount, date_str=None):
         print(f"Commitment match error: {e}")
     
     return inserted["transaction_id"] if inserted else None
-

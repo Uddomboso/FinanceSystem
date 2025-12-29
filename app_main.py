@@ -1,17 +1,49 @@
-# app_main.py - FIXED TO PROPERLY USE NEW SYSTEM
+# app_main.py - Load .env BEFORE any imports that use Config
 import sys
-from PyQt5.QtWidgets import QApplication,QSplashScreen,QMessageBox
-from PyQt5.QtCore import Qt,QTimer
+import os
+from pathlib import Path
+
+# Load .env file FIRST, before any other imports
+script_dir = Path(__file__).parent.absolute()
+env_path = script_dir / ".env"
+
+if env_path.exists():
+    from dotenv import load_dotenv
+    load_dotenv(dotenv_path=env_path)
+    print(f"✅ app_main.py: Loaded .env from {env_path}")
+else:
+    print(f"⚠️  app_main.py: .env not found at {env_path}, trying current directory")
+    from dotenv import load_dotenv
+    load_dotenv()
+
+# Verify keys are loaded before importing Config
+print("🔍 app_main.py: Checking WorkOS keys before imports:")
+print(f"   WORKOS_API_KEY: {'SET' if os.getenv('WORKOS_API_KEY') else 'NOT SET'}")
+print(f"   WORKOS_CLIENT_ID: {'SET' if os.getenv('WORKOS_CLIENT_ID') else 'NOT SET'}")
+print(f"   WORKOS_REDIRECT_URL: {os.getenv('WORKOS_REDIRECT_URL', 'NOT SET')}")
+print()
+
+# NOW import PyQt5 and other modules
+from PyQt5.QtWidgets import QApplication, QSplashScreen, QMessageBox
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPixmap
 
-# SET QT ATTRIBUTES BEFORE CREATING QAPPLICATION
-QApplication.setAttribute(Qt.AA_ShareOpenGLContexts,True)
-QApplication.setAttribute(Qt.AA_EnableHighDpiScaling,True)
+# Set Qt attributes before creating QApplication
+QApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
+QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
 
-from core.theme_manager import theme_manager
+# Import Config AFTER dotenv is loaded
 from core.config import Config
+from core.theme_manager import theme_manager
 from core.logger import logger
 from core.user_settings import UserSettings
+
+# Verify Config has the values
+print("🔍 app_main.py: Config values after import:")
+print(f"   Config.WORKOS_API_KEY: {'SET' if Config.WORKOS_API_KEY else 'NOT SET'}")
+print(f"   Config.WORKOS_CLIENT_ID: {'SET' if Config.WORKOS_CLIENT_ID else 'NOT SET'}")
+print(f"   Config.WORKOS_REDIRECT_URL: {Config.WORKOS_REDIRECT_URL}")
+print()
 
 
 class PennyWiseApp:
@@ -19,7 +51,6 @@ class PennyWiseApp:
 
     def __init__(self):
         self.app = QApplication(sys.argv)
-        # Prevent app from quitting when the last window closes during transitions (e.g., login -> dashboard)
         self.app.setQuitOnLastWindowClosed(False)
         self.dashboard = None
         self.login_window = None
@@ -29,13 +60,9 @@ class PennyWiseApp:
 
     def setup_application(self):
         """Setup application-wide settings"""
-        # Apply theme
         theme_manager.load_stylesheets()
-        # Load user theme preference if available
         default_theme = "light"
         try:
-            # If no user yet, fallback to light; once login succeeds, the dashboard will reapply
-            # but we try to respect persisted setting when possible.
             if self.user_id:
                 us = UserSettings(self.user_id)
                 default_theme = "dark" if us.settings.get("dark_mode") else "light"
@@ -43,24 +70,20 @@ class PennyWiseApp:
             logger.warning(f"Could not load user theme preference, using light: {e}")
         theme_manager.apply_theme(self.app, default_theme)
 
-        # App metadata
         self.app.setApplicationName("PennyWise")
         self.app.setApplicationVersion("2.0.0")
         self.app.setOrganizationName("PennyWise")
 
-        # Initialize database for v2
         self.setup_database()
 
     def setup_database(self):
         """Ensure database has required tables for v2"""
         try:
-            from database.db_manager import fetch_all,execute_query
+            from database.db_manager import fetch_all, execute_query
 
-            # Check if we have the new commitment tables
             tables = fetch_all("SELECT name FROM sqlite_master WHERE type='table'")
             table_names = [table['name'] for table in tables]
 
-            # Create missing tables for v2 features
             if 'category_commitments' not in table_names:
                 logger.info("Creating v2 database tables...")
                 self.create_v2_tables()
@@ -74,7 +97,6 @@ class PennyWiseApp:
         from database.db_manager import execute_query
 
         try:
-            # Category commitments table
             execute_query("""
                 CREATE TABLE IF NOT EXISTS category_commitments (
                     commitment_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,7 +110,7 @@ class PennyWiseApp:
                     FOREIGN KEY (user_id) REFERENCES users (user_id),
                     FOREIGN KEY (category_id) REFERENCES categories (category_id)
                 )
-            """,commit=True)
+            """, commit=True)
 
             logger.info("V2 database tables created successfully")
         except Exception as e:
@@ -97,9 +119,9 @@ class PennyWiseApp:
     def show_splash_screen(self):
         """Show splash screen"""
         try:
-            splash_pix = QPixmap(300,200)
+            splash_pix = QPixmap(300, 200)
             splash_pix.fill(Qt.white)
-            splash = QSplashScreen(splash_pix,Qt.WindowStaysOnTopHint)
+            splash = QSplashScreen(splash_pix, Qt.WindowStaysOnTopHint)
             splash.showMessage(
                 "Loading PennyWise v2...",
                 Qt.AlignBottom | Qt.AlignCenter,
@@ -107,14 +129,14 @@ class PennyWiseApp:
             )
             splash.show()
             self.app.processEvents()
-            QTimer.singleShot(2000,splash.close)
+            QTimer.singleShot(2000, splash.close)
             return splash
         except Exception as e:
             logger.warning(f"Splash failed: {e}")
             return None
 
     def show_login(self):
-        """Show login window - FIXED to properly handle new system"""
+        """Show login window"""
         try:
             from ui.loginv2 import LoginWindowV2
             self.login_window = LoginWindowV2()
@@ -123,7 +145,6 @@ class PennyWiseApp:
             logger.info("LoginWindowV2 displayed")
         except Exception as e:
             logger.error(f"Failed to show LoginWindowV2: {e}")
-            # Instead of falling back to demo, show error and try old system
             self.fallback_to_old_login()
 
     def fallback_to_old_login(self):
@@ -132,58 +153,50 @@ class PennyWiseApp:
             from ui.login_window import LoginWindow
             self.login_window = LoginWindow()
 
-            # Monkey-patch the old login to work with new flow
-            def old_login_success_wrapper():
-                # For old system, we need to extract user info differently
-                # This is a hack to make old system work with new flow
-                QMessageBox.warning(None,"Compatibility Mode",
-                                    "Using old system - some features may be limited")
-                self.on_login_success(1,"User")  # Default user
-
-            # Connect the old login success (this is a bit hacky)
-            if hasattr(self.login_window,'login_successful'):
-                self.login_window.login_successful.connect(self.on_login_success)
+            if hasattr(self.login_window, 'login_successful'):
+                def wrapped_login(user_id, username):
+                    from database.db_manager import fetch_one
+                    user = fetch_one("SELECT role FROM users WHERE user_id = ?", (user_id,))
+                    role = user.get("role", "End User") if user else "End User"
+                    self.on_login_success(user_id, username, role)
+                self.login_window.login_successful.connect(wrapped_login)
             else:
-                # If old system doesn't have signals, we'll handle it differently
-                QTimer.singleShot(1000,lambda: QMessageBox.information(
-                    None,"Info","Please use the old login system normally"))
+                QTimer.singleShot(1000, lambda: QMessageBox.information(
+                    None, "Info", "Please use the old login system normally"))
 
             self.login_window.show()
             logger.info("Using old LoginWindow as fallback")
         except Exception as e:
             logger.error(f"All login methods failed: {e}")
-            QMessageBox.critical(None,"Error",
+            QMessageBox.critical(None, "Error",
                                  "Cannot start application. Please check your installation.")
             sys.exit(1)
 
-    def on_login_success(self,user_id,username):
+    def on_login_success(self, user_id, username, role):
         """Handle successful login"""
         self.user_id = user_id
         self.username = username
-        logger.info(f"User {username} (ID: {user_id}) logged in successfully")
+        self.user_role = role
+        logger.info(f"User {username} (ID: {user_id}, Role: {role}) logged in successfully")
 
-        # Close login window if it exists
         if self.login_window:
             self.login_window.close()
             self.login_window = None
 
-        # Start dashboard
         self.start_dashboard()
 
     def start_dashboard(self):
-        """Start the main dashboard - Uses new DashboardMain only"""
+        """Start the main dashboard"""
         if self.dashboard_started:
             return
         self.dashboard_started = True
 
         print(f"Starting dashboard for user {self.username} (ID: {self.user_id})")
 
-        # Ensure QApplication is ready
         if not QApplication.instance():
             print("QApplication not initialized!")
             return
 
-        # Re-apply theme using the logged-in user's preference (source of truth)
         try:
             us = UserSettings(self.user_id)
             user_theme = "dark" if us.is_dark_mode_enabled() else "light"
@@ -191,14 +204,12 @@ class PennyWiseApp:
         except Exception as e:
             logger.warning(f"Could not apply user theme preference, keeping current theme: {e}")
 
-        # Apply font size preference
         try:
             from core.font_manager import apply_font_size
             from database.db_manager import fetch_one
             settings = fetch_one("SELECT font_family FROM settings WHERE user_id = ?", (self.user_id,))
             if settings and 'font_family' in settings.keys():
                 font_size = settings['font_family']
-                # Map old values to new size labels
                 if font_size in ["Small", "Medium", "Large"]:
                     apply_font_size(font_size)
                 else:
@@ -209,11 +220,11 @@ class PennyWiseApp:
             logger.warning(f"Could not apply font size preference: {e}")
 
         try:
-            # Import and create the new dashboard
             from ui.dashboard_main import DashboardMain
             self.dashboard = DashboardMain(
                 user_id=self.user_id,
                 username=self.username,
+                role=self.user_role,
                 show_tutorial=False
             )
             logger.info("Modern Dashboard Loaded Successfully")
@@ -234,7 +245,7 @@ class PennyWiseApp:
         """Create an error dashboard when new dashboard fails"""
         from PyQt5.QtWidgets import QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton
         from PyQt5.QtCore import Qt
-        
+
         self.dashboard = QMainWindow()
         self.dashboard.setWindowTitle(f"PennyWise v2 - {self.username} (Error)")
         central = QWidget()
@@ -290,41 +301,16 @@ class PennyWiseApp:
             self.dashboard.close()
         self.start_dashboard()
 
-    def create_basic_dashboard(self):
-        """Create a basic dashboard as last resort"""
-        from PyQt5.QtWidgets import QMainWindow,QLabel,QVBoxLayout,QWidget
-        self.dashboard = QMainWindow()
-        self.dashboard.setWindowTitle(f"PennyWise v2 - {self.username}")
-        central = QWidget()
-        layout = QVBoxLayout(central)
-
-        title = QLabel(f"Welcome to PennyWise v2, {self.username}!")
-        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #704b3b; margin: 20px;")
-
-        subtitle = QLabel("Basic Mode - New dashboard failed to load")
-        subtitle.setStyleSheet("font-size: 16px; color: #8a6d5b; margin: 10px;")
-
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-        layout.addStretch()
-
-        self.dashboard.setCentralWidget(central)
-        logger.info("Using Basic Dashboard (Fallback)")
-        self.dashboard.show()
-
     def run(self):
         """Run the application"""
         logger.info("Starting PennyWise Application v2.0")
 
-        # Setup app
         self.setup_application()
 
-        # Show splash
         splash = self.show_splash_screen()
 
-        # Show login after splash
         if splash:
-            QTimer.singleShot(1500,self.show_login)
+            QTimer.singleShot(1500, self.show_login)
         else:
             self.show_login()
 

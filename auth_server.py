@@ -1,22 +1,28 @@
 """
-Minimal WorkOS SSO helper server.
+Minimal WorkOS AuthKit helper server.
 
 Usage:
 1) Set .env with:
    WORKOS_API_KEY=sk_...
    WORKOS_CLIENT_ID=client_...
    WORKOS_REDIRECT_URL=http://localhost:8000/callback
-   # optionally:
-   # WORKOS_CONNECTION_ID=conn_...  or WORKOS_ORGANIZATION_ID=org_...
 2) pip install workos flask python-dotenv
 3) python auth_server.py
-4) In your app, open http://localhost:8000/ in a browser to start SSO.
+4) In your app, open http://localhost:8000/ in a browser to start Google OAuth.
 """
 
 import os
 from flask import Flask, redirect, request
 from dotenv import load_dotenv
-from workos import client
+
+# Try to import WorkOS with latest SDK
+try:
+    from workos import WorkOSClient
+    WORKOS_AVAILABLE = True
+except ImportError:
+    print("Error: WorkOS package not installed. Install with: pip install workos")
+    WORKOS_AVAILABLE = False
+    WorkOSClient = None
 
 
 load_dotenv()
@@ -24,25 +30,18 @@ load_dotenv()
 WORKOS_API_KEY = os.environ.get("WORKOS_API_KEY", "")
 WORKOS_CLIENT_ID = os.environ.get("WORKOS_CLIENT_ID", "")
 WORKOS_REDIRECT_URL = os.environ.get("WORKOS_REDIRECT_URL", "") or os.environ.get("WORKOS_REDIRECT_URI", "")
-WORKOS_CONNECTION_ID = os.environ.get("WORKOS_CONNECTION_ID", "")
-WORKOS_ORGANIZATION_ID = os.environ.get("WORKOS_ORGANIZATION_ID", "")
 
-workos = client.Client(api_key=WORKOS_API_KEY)
+if WORKOS_AVAILABLE and WORKOS_API_KEY and WORKOS_CLIENT_ID:
+    workos = WorkOSClient(api_key=WORKOS_API_KEY, client_id=WORKOS_CLIENT_ID)
+else:
+    workos = None
 app = Flask(__name__)
 
 
 def _auth_url():
-    # One of connection or organization is required by WorkOS
-    kwargs = {}
-    if WORKOS_CONNECTION_ID:
-        kwargs["connection"] = WORKOS_CONNECTION_ID
-    if WORKOS_ORGANIZATION_ID:
-        kwargs["organization"] = WORKOS_ORGANIZATION_ID
-
-    return workos.sso.get_authorization_url(
-        client_id=WORKOS_CLIENT_ID,
+    return workos.user_management.get_authorization_url(
         redirect_uri=WORKOS_REDIRECT_URL,
-        **kwargs,
+        provider="GoogleOAuth"
     )
 
 
@@ -59,9 +58,10 @@ def callback():
     code = request.args.get("code")
     if not code:
         return "Missing code", 400
-    profile = workos.sso.get_profile_and_token(code=code)
-    # TODO: persist session, update app state, etc.
-    return f"Logged in as {profile.email}"
+    auth_response = workos.user_management.authenticate_with_code(code=code)
+    user = getattr(auth_response, 'user', None)
+    email = getattr(user, 'email', 'Unknown') if user else 'Unknown'
+    return f"Logged in as {email}"
 
 
 if __name__ == "__main__":

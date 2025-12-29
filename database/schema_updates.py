@@ -141,5 +141,19 @@ def update_schema_v3():
     # Add settings table
     add_settings_table()
     
+    # Add role support migration
+    try:
+        from database.migrations.add_role_support import apply_role_migration
+        apply_role_migration()
+    except Exception as e:
+        print(f"Warning: Role migration failed (may already be applied): {e}")
+    
+    # Add logging support migration
+    try:
+        from database.migrations.add_logging_support import apply_logging_migration
+        apply_logging_migration()
+    except Exception as e:
+        print(f"Warning: Logging migration failed (may already be applied): {e}")
+    
     # Add any other v3 features here
     print("Database schema updated to v3 with settings support")

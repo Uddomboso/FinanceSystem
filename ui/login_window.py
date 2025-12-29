@@ -1,22 +1,22 @@
 from PyQt5.QtWidgets import (
-    QWidget,QLabel,QLineEdit,QPushButton,QVBoxLayout,QHBoxLayout,
-    QStackedLayout,QMessageBox,QFrame
+    QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout,
+    QStackedLayout, QMessageBox, QFrame
 )
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, pyqtSignal
 import bcrypt
 import os
 
-from database.db_manager import insert_user,fetch_one,execute_query
+from database.db_manager import insert_user, fetch_one, execute_query
 
 
 class LoginWindow(QWidget):
-    signup_successful = pyqtSignal(int, str)  # user_id, username
+    login_successful = pyqtSignal(int, str, str)  # user_id, username, role
     
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Login or Sign Up")
-        self.setMinimumSize(1000,700)
+        self.setMinimumSize(1000, 700)
         self.setStyleSheet("""
             font-family: Segoe UI;
             font-size: 16px;
@@ -146,7 +146,6 @@ class LoginWindow(QWidget):
             }
         """)
 
-        # Add widgets to form
         form_layout.addWidget(email_label)
         form_layout.addWidget(self.email)
         form_layout.addWidget(password_label)
@@ -200,7 +199,6 @@ class LoginWindow(QWidget):
         switch_layout.addWidget(switch_label)
         switch_layout.addWidget(switch_btn)
 
-        # Add all to main container
         container.addWidget(header)
         container.addWidget(subheader)
         container.addSpacing(20)
@@ -284,7 +282,6 @@ class LoginWindow(QWidget):
             }
         """)
 
-        # Add widgets to form
         form_layout.addWidget(email_label)
         form_layout.addWidget(self.new_email)
         form_layout.addWidget(username_label)
@@ -340,7 +337,6 @@ class LoginWindow(QWidget):
         switch_layout.addWidget(switch_label)
         switch_layout.addWidget(switch_btn)
 
-        # Add all to main container
         container.addWidget(header)
         container.addWidget(subheader)
         container.addSpacing(20)
@@ -358,15 +354,23 @@ class LoginWindow(QWidget):
         email = self.email.text().strip()
         password = self.password.text().encode()
 
+        if not email or not password:
+            QMessageBox.warning(self, "Error", "Please fill in all fields.")
+            return
+
         user = fetch_one("SELECT * FROM users WHERE email = ?", (email,))
         if user:
             if bcrypt.checkpw(password, user["password_hash"].encode()):
+                # Update last login
+                execute_query(
+                    "UPDATE users SET last_login = datetime('now') WHERE user_id = ?",
+                    (user["user_id"],),
+                    commit=True
+                )
                 QMessageBox.information(self, "Success", "Login successful!")
                 self.hide()
-                # Import here to avoid circular import
-                from ui.dashboard_user import UserDashboard
-                self.dash = UserDashboard(user["username"], user["user_id"])
-                self.dash.show()
+                # Import dashboard only after successful login
+                self.open_dashboard(user["user_id"], user["username"], user.get("role", "End User"))
             else:
                 QMessageBox.warning(self, "Failed", "Incorrect password. Please try again.")
         else:
@@ -381,58 +385,86 @@ class LoginWindow(QWidget):
             QMessageBox.warning(self, "Error", "Please fill in all fields.")
             return
 
+        # Check if email or username already exists
+        existing_email = fetch_one("SELECT user_id FROM users WHERE email = ?", (email,))
+        if existing_email:
+            QMessageBox.warning(self, "Error", "An account with this email already exists.")
+            return
+
+        existing_username = fetch_one("SELECT user_id FROM users WHERE username = ?", (username,))
+        if existing_username:
+            QMessageBox.warning(self, "Error", "This username is already taken.")
+            return
+
         hashed = bcrypt.hashpw(password, bcrypt.gensalt()).decode()
         try:
             # Create user
             insert_user(email, username, hashed, role="End User")
 
-            # Fetch the newly created user's ID
-            user = fetch_one("SELECT user_id FROM users WHERE email = ?", (email,))
+            # Fetch the newly created user
+            user = fetch_one("SELECT user_id, username, role FROM users WHERE email = ?", (email,))
             if not user:
                 QMessageBox.critical(self, "Error", "Failed to retrieve user after signup.")
                 return
 
             user_id = user["user_id"]
+            username = user["username"]
+            role = user.get("role", "End User")
 
-            # Create default categories for the new user
+            # Create default categories and settings
             self.create_default_categories(user_id)
+            self.create_default_settings(user_id)
 
-            # Create NotificationManager and connect signal for signup success
-            from core.notification_manager import NotificationManager
-            notification_manager = NotificationManager(user_id)
-            self.signup_successful.connect(notification_manager.handle_signup_success)
-            
-            # Emit signal for signup success - NotificationManager will handle notification and toast
-            self.signup_successful.emit(user_id, username)
-
-            # Auto-login after signup
+            QMessageBox.information(self, "Success", "Account created successfully!")
             self.hide()
-            # Import here to avoid circular import
-            from ui.dashboard_user import UserDashboard
-            self.dash = UserDashboard(username, user_id)
-            self.dash.show()
+            # Import dashboard only after successful signup
+            self.open_dashboard(user_id, username, role)
 
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Could not create account: {e}")
+            QMessageBox.critical(self, "Error", f"Could not create account: {str(e)}")
 
     def create_default_categories(self, user_id):
-        """Automatically create default categories for a new user."""
-        try:
-            defaults = [
-                ("Savings", "#3cba54"),
-                ("Bills", "#db3236"),
-                ("Spending", "#4885ed")
-            ]
-            for name, color in defaults:
+        """Create default categories for new user with error handling"""
+        defaults = [
+            ("Savings", "#3cba54"),
+            ("Bills", "#db3236"),
+            ("Spending", "#4885ed")
+        ]
+        for name, color in defaults:
+            try:
                 exists = fetch_one(
                     "SELECT category_id FROM categories WHERE user_id = ? AND category_name = ?",
-                    (user_id, name),
+                    (user_id, name)
                 )
                 if not exists:
                     execute_query(
-                        "INSERT INTO categories (user_id, category_name, color) VALUES (?, ?, ?)",
+                        "INSERT INTO categories (user_id, category_name, color, is_default) VALUES (?, ?, ?, 1)",
                         (user_id, name, color),
-                        commit=True,
+                        commit=True
                     )
+            except Exception as e:
+                print(f"Error creating category {name}: {e}")
+
+    def create_default_settings(self, user_id):
+        """Create default settings for new user"""
+        try:
+            existing = fetch_one("SELECT user_id FROM settings WHERE user_id = ?", (user_id,))
+            if not existing:
+                execute_query(
+                    "INSERT INTO settings (user_id, currency, dark_mode, notifications_enabled) VALUES (?, 'USD', 0, 1)",
+                    (user_id,),
+                    commit=True
+                )
         except Exception as e:
-            print("⚠️ Error creating default categories:", e)
+            print(f"Error creating default settings: {e}")
+
+    def open_dashboard(self, user_id, username, role):
+        """Open dashboard after successful login/signup - lazy import"""
+        try:
+            from ui.dashboard_main import DashboardMain
+            self.dash = DashboardMain(user_id=user_id, username=username, role=role, show_tutorial=False)
+            self.dash.show()
+        except ImportError as e:
+            QMessageBox.critical(self, "Error", f"Failed to load dashboard: {e}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open dashboard: {e}")

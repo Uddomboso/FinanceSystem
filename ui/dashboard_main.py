@@ -29,6 +29,7 @@ from PyQt5.QtWidgets import QGraphicsOpacityEffect
 from database.db_manager import fetch_all, fetch_one, execute_query
 from core.plaid_api import create_link_token, exchange_public_token, get_accounts, get_transactions, get_account_balances
 from core.logger import logger
+from core.maintenance_mode import get_maintenance_mode
 import qtawesome as qta
 from PyQt5.QtWidgets import QStatusBar,QMenu,QSystemTrayIcon,QGridLayout, QSpacerItem
 from PyQt5.QtWidgets import QGraphicsDropShadowEffect, QGridLayout
@@ -1045,11 +1046,12 @@ class MetricsCarousel(QWidget):
 class ModernNavigationBar(QWidget):
     """Modern left sidebar navigation with icons and text."""
 
-    def __init__(self,parent=None,logout_callback=None,nav_callbacks=None):
+    def __init__(self,parent=None,logout_callback=None,nav_callbacks=None,user_role="End User"):
         super().__init__(parent)
         self.setObjectName("NavRoot")
         self.logout_callback = logout_callback
         self.nav_callbacks = nav_callbacks or {}
+        self.user_role = user_role
         self.setFixedWidth(240)
         self.setContentsMargins(0,0,0,0)
         # Ensure stylesheet background paints for QWidget
@@ -1295,6 +1297,11 @@ class ModernNavigationBar(QWidget):
             ("Settings", "fa5s.cog"),
             ("Link Bank", "fa5s.university")
         ])
+
+        # Add admin navigation item if user is admin
+        is_admin = self.user_role in ['Admin', 'Technical Manager', 'General Manager']
+        if is_admin:
+            self.nav_data_map["Admin"] = "fa5s.user-shield"
 
         self.nav_buttons = {}
         for text,icon_id in self.nav_data_map.items():
@@ -1701,7 +1708,7 @@ class CommitmentTrackerWidget(QWidget):
 
         # Status with due day information
         today = datetime.now().day
-        status_text = "🔄 Due today!" if today == due_day else f"📅 Due day {due_day}"
+        status_text = "Due today!" if today == due_day else f"Due day {due_day}"
         status_color = theme_color('error') if today == due_day else theme_color('warning')
 
         status_label = QLabel(status_text)
@@ -1817,7 +1824,7 @@ class CommitmentTrackerWidget(QWidget):
             # Show category name below the icon
             btn.setText(f"\n{category_name}")
             amount_text = f"${amount:.0f}" if amount >= 100 else f"${amount:.2f}"
-            btn.setToolTip(f"{category_name}\n{amount_text}/month\n✅ Paid")
+            btn.setToolTip(f"{category_name}\n{amount_text}/month\nPaid")
         else:
             # Content text (two-line: amount then name)
             amount_text = f"${amount:.0f}" if amount >= 100 else f"${amount:.2f}"
@@ -2105,7 +2112,7 @@ class CommitmentTrackerWidget(QWidget):
 
                 # Add notification
                 from core.commitment_manager import add_notification
-                add_notification(self.user_id,f"✅ {category_name} marked as paid!","payment")
+                add_notification(self.user_id,f"{category_name} marked as paid!","payment")
 
                 QMessageBox.information(self,"Success",f"{category_name} marked as paid!")
                 self.load_commitments()
@@ -2293,7 +2300,7 @@ class CommitmentTrackerWidget(QWidget):
                             
                             QMessageBox.information(
                                 self, "Smart Detect",
-                                f"✅ Matched and marked as paid:\n"
+                                f"Matched and marked as paid:\n"
                                 f"{txn_desc} - ${txn_amount:.2f}"
                             )
                 else:
@@ -2435,7 +2442,7 @@ class CommitmentTrackerWidget(QWidget):
                             
                             QMessageBox.information(
                                 self, "Smart Detect",
-                                f"✅ Selected transaction marked as paid:\n"
+                                f"Selected transaction marked as paid:\n"
                                 f"{txn_desc} - ${txn_amount:.2f}"
                             )
                     else:
@@ -2656,10 +2663,11 @@ class DashboardMain(QMainWindow):
     """Modern Dashboard with Navigation & Notifications"""
     balances_update_requested = pyqtSignal()
 
-    def __init__(self,user_id,username,show_tutorial=True):
+    def __init__(self,user_id,username,role="End User",show_tutorial=True):
         super().__init__()
         self.user_id = user_id
         self.username = username
+        self.user_role = role
         self.previous_mood = None
         self.penny_personality = None
         # DEPRECATED: balances_update_requested signal - use rebuild_overview_cards() directly instead
@@ -2690,6 +2698,20 @@ class DashboardMain(QMainWindow):
         self.tutorial_manager = TutorialManager(self)
         if show_tutorial:
             QTimer.singleShot(2000,self.tutorial_manager.start_tutorial)
+        
+        # Admin dashboard window reference (separate window, not embedded)
+        self._admin_window = None
+        
+        # Maintenance mode check
+        self.maintenance_mode = get_maintenance_mode()
+        self.maintenance_check_timer = QTimer()
+        self.maintenance_check_timer.timeout.connect(self._check_and_show_maintenance)
+        self.maintenance_check_timer.start(5000)  # Check every 5 seconds
+        self._check_and_show_maintenance()
+
+    def is_admin(self):
+        """Check if current user has admin privileges - used only for navigation visibility"""
+        return self.user_role in ['Admin', 'Technical Manager', 'General Manager']
 
     def setup_window(self):
         self.setWindowTitle(f"PennyWise - {self.username}'s Dashboard")
@@ -3203,6 +3225,26 @@ class DashboardMain(QMainWindow):
         )
         
         if reply == QMessageBox.Yes:
+            # Clear session
+            try:
+                from core.session_manager import get_session_manager
+                session_manager = get_session_manager()
+                session_manager.delete_user_sessions(self.user_id)
+            except Exception as e:
+                print(f"Error clearing session: {e}")
+            
+            # Log logout event
+            try:
+                from core.system_logger import log_info
+                log_info("User Logout", self.user_id, f"User {self.username} logged out")
+            except Exception:
+                pass  # Fail silently if logging unavailable
+            
+            # Close admin window if open
+            if hasattr(self, '_admin_window') and self._admin_window:
+                self._admin_window.close()
+                self._admin_window = None
+            
             # Close the current dashboard
             self.close()
             
@@ -3244,8 +3286,13 @@ class DashboardMain(QMainWindow):
         # Link Bank page (created fresh each time show_link_bank is called)
         self.page_bank = None
         
+        # Admin dashboard is separate window, not embedded here
         # Connect to commitment form signals for notification updates
         # We'll connect this when the commitment form is created dynamically
+        
+        # Maintenance page (for end users when maintenance mode is enabled)
+        from ui.maintenance_view import MaintenanceView
+        self.page_maintenance = MaintenanceView(self)
         
         # Add all pages to stack (bank page added dynamically in show_link_bank)
         self.stack.addWidget(self.page_dashboard)
@@ -3253,9 +3300,11 @@ class DashboardMain(QMainWindow):
         self.stack.addWidget(self.page_accounts)
         self.stack.addWidget(self.page_reports)
         self.stack.addWidget(self.page_settings)
+        self.stack.addWidget(self.page_maintenance)
         
-        # Set dashboard as default
-        self.stack.setCurrentWidget(self.page_dashboard)
+        # Set dashboard as default (maintenance check happens in _check_and_show_maintenance)
+        if not self._should_show_maintenance():
+            self.stack.setCurrentWidget(self.page_dashboard)
 
     def build_dashboard_page(self):
         """Build the main dashboard page"""
@@ -4602,6 +4651,25 @@ class DashboardMain(QMainWindow):
         """Show settings view"""
         self.stack.setCurrentWidget(self.page_settings)
         self.highlight_nav("Settings")
+    
+    def show_admin_dashboard(self):
+        """Open admin dashboard as separate window (only for admin users)"""
+        if not self.is_admin():
+            return
+        
+        # Check if admin dashboard already open
+        if hasattr(self, '_admin_window') and self._admin_window and self._admin_window.isVisible():
+            self._admin_window.raise_()
+            self._admin_window.activateWindow()
+            return
+        
+        # Create and show admin dashboard as separate window
+        from ui.admin_dashboard import AdminDashboard
+        self._admin_window = AdminDashboard(self.user_id, self.username)
+        self._admin_window.show()
+        
+        # Highlight admin nav button
+        self.highlight_nav("Admin")
 
     def show_link_bank(self, account_type_intent=None):
         """Show link bank view with fresh state"""
@@ -4624,6 +4692,34 @@ class DashboardMain(QMainWindow):
         
         self.stack.setCurrentWidget(self.page_bank)
         self.highlight_nav("Link Bank")
+    
+    def _should_show_maintenance(self) -> bool:
+        """Check if maintenance mode should be shown for this user"""
+        # Admins can always access the dashboard
+        if self.is_admin():
+            return False
+        
+        # End users see maintenance screen if maintenance mode is enabled
+        return self.maintenance_mode.is_enabled()
+    
+    def _check_and_show_maintenance(self):
+        """Check maintenance mode and show appropriate view"""
+        if self._should_show_maintenance():
+            # Show maintenance view
+            if hasattr(self, 'page_maintenance'):
+                self.stack.setCurrentWidget(self.page_maintenance)
+                # Update message in case it changed
+                self.page_maintenance.update_message()
+                # Hide navigation for end users in maintenance
+                if hasattr(self, 'nav_bar'):
+                    self.nav_bar.setVisible(False)
+        else:
+            # Show normal dashboard
+            if hasattr(self, 'page_dashboard'):
+                self.stack.setCurrentWidget(self.page_dashboard)
+                # Show navigation
+                if hasattr(self, 'nav_bar'):
+                    self.nav_bar.setVisible(True)
 
     def highlight_nav(self, active_text):
         """Highlight the active navigation button"""
@@ -4833,7 +4929,11 @@ class DashboardMain(QMainWindow):
             "Settings": self.show_settings,
             "Link Bank": self.show_link_bank
         }
-        self.nav_bar = ModernNavigationBar(self, self.logout, nav_callbacks)
+        # Add admin callback if user is admin
+        if self.is_admin():
+            nav_callbacks["Admin"] = self.show_admin_dashboard
+        
+        self.nav_bar = ModernNavigationBar(self, self.logout, nav_callbacks, self.user_role)
         
         # Set up notification manager for badge after nav_bar is created
         if hasattr(self, 'notification_manager'):
