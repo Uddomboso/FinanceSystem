@@ -24,6 +24,12 @@ class UserSettings:
         
     def create_default_settings(self):
         """Create default settings for new user"""
+        # Check if settings already exist to prevent UNIQUE constraint violation
+        existing = fetch_one("SELECT user_id FROM settings WHERE user_id = ?", (self.user_id,))
+        if existing:
+            # Settings already exist, load them instead
+            return dict(fetch_one("SELECT * FROM settings WHERE user_id = ?", (self.user_id,)))
+        
         default_settings = {
             'user_id': self.user_id,
             'currency': 'USD',

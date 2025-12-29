@@ -232,15 +232,25 @@ class SettingsWindow(QWidget):
                 "custom_accent_color": ("TEXT", "'#d6733a'", True),
                 "font_family": ("TEXT", "'Segoe UI'", True),
                 "dark_mode": ("BOOLEAN", "0", False),
-                "created_at": ("DATETIME", "CURRENT_TIMESTAMP", True),
-                "updated_at": ("DATETIME", "CURRENT_TIMESTAMP", True),
+                # Note: created_at and updated_at cannot use CURRENT_TIMESTAMP in ALTER TABLE
+                # They must be added without default, then updated manually if needed
+                "created_at": ("DATETIME", None, True),
+                "updated_at": ("DATETIME", None, True),
             }
             for col, (col_type, default_val, _) in desired.items():
                 if col not in columns:
-                    execute_query(
-                        f"ALTER TABLE settings ADD COLUMN {col} {col_type} DEFAULT {default_val}",
-                        commit=True,
-                    )
+                    if default_val is None:
+                        # For columns that can't have CURRENT_TIMESTAMP default in ALTER TABLE
+                        # Add without default, then update existing rows if needed
+                        execute_query(
+                            f"ALTER TABLE settings ADD COLUMN {col} {col_type}",
+                            commit=True,
+                        )
+                    else:
+                        execute_query(
+                            f"ALTER TABLE settings ADD COLUMN {col} {col_type} DEFAULT {default_val}",
+                            commit=True,
+                        )
         except Exception as e:
             print(f"Warning: could not ensure settings columns: {e}")
         
@@ -814,8 +824,8 @@ class SettingsWindow(QWidget):
                 self.dark_mode_checkbox.setChecked(bool(settings['dark_mode'] if 'dark_mode' in settings.keys() else False))
                 
                 # Load font size (map from database value to combo box)
-                font_family = settings.get('font_family', 'Medium')
-                if 'font_family' in settings.keys() and font_family in ["Small", "Medium", "Large"]:
+                font_family = settings['font_family'] if 'font_family' in settings.keys() else 'Medium'
+                if font_family in ["Small", "Medium", "Large"]:
                     self.font_size_combo.setCurrentText(font_family)
                 else:
                     self.font_size_combo.setCurrentText("Medium")
@@ -838,6 +848,18 @@ class SettingsWindow(QWidget):
             
     def create_default_settings(self):
         """Create default settings for new user"""
+        # Check if settings already exist to prevent UNIQUE constraint violation
+        existing = fetch_one("SELECT user_id FROM settings WHERE user_id = ?", (self.user_id,))
+        if existing:
+            # Settings already exist, load them instead
+            try:
+                settings = fetch_one("SELECT * FROM settings WHERE user_id = ?", (self.user_id,))
+                if settings:
+                    self.current_settings = dict(settings)
+                    return
+            except Exception as e:
+                print(f"Error loading existing settings: {e}")
+        
         default_settings = {
             'user_id': self.user_id,
             'dark_mode': False,
@@ -896,14 +918,6 @@ class SettingsWindow(QWidget):
 
     def on_font_size_changed(self, size_label):
         """Apply font size immediately when changed."""
-        # #region agent log
-        import json
-        from datetime import datetime
-        try:
-            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"location":"settings_window.py:905","message":"font size changed in settings","data":{"new_size":size_label},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","runId":"run1","hypothesisId":"E"})+'\n')
-        except: pass
-        # #endregion
         try:
             from core.font_manager import apply_font_size
             apply_font_size(size_label)
@@ -914,12 +928,6 @@ class SettingsWindow(QWidget):
             while parent:
                 if hasattr(parent, 'nav_bar') and hasattr(parent.nav_bar, 'refresh_theme'):
                     parent.nav_bar.refresh_theme()
-                    # #region agent log
-                    try:
-                        with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                            f.write(json.dumps({"location":"settings_window.py:921","message":"navbar refreshed after font change","data":{"size":size_label},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","runId":"run1","hypothesisId":"C,E"})+'\n')
-                    except: pass
-                    # #endregion
                     break
                 parent = parent.parent() if hasattr(parent, 'parent') and callable(parent.parent) else None
         except Exception as e:

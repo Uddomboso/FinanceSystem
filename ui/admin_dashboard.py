@@ -22,29 +22,42 @@ from core.logger import logger
 from core.maintenance_mode import get_maintenance_mode
 from core.system_diagnostics import get_diagnostics
 from core.workos_auth import get_workos_authenticator
+from assets.styles.penny_colors import PennyColors
+from core.theme_manager import theme_manager
 
 class APITestWorker(QThread):
     """Worker thread for API testing"""
     test_completed = pyqtSignal(dict)
     test_progress = pyqtSignal(str, dict)  # Signal for individual test completion
     
-    def __init__(self, api_name=None):
+    def __init__(self, api_name=None, diagnostics=None):
         super().__init__()
         self.api_name = api_name  # If None, test all; otherwise test specific API
+        self.diagnostics = diagnostics  # For WorkOS health check
         self.apis_to_test = {
+            'WorkOS Auth': {
+                'type': 'workos',  # Special type for WorkOS
+                'url': None,
+                'method': None,
+                'headers': None,
+                'data': None
+            },
             'GROQ AI': {
+                'type': 'http',
                 'url': 'https://api.groq.com/openai/v1/chat/completions',
                 'method': 'POST',
                 'headers': {'Authorization': 'Bearer demo_key', 'Content-Type': 'application/json'},
                 'data': {'model': 'llama2-70b-4096', 'messages': [{'role': 'user', 'content': 'test'}]}
             },
             'Plaid Sandbox': {
+                'type': 'http',
                 'url': 'https://sandbox.plaid.com',
                 'method': 'GET',
                 'headers': {},
                 'data': None
             },
             'Currency API': {
+                'type': 'http',
                 'url': 'https://api.exchangerate.host/latest',
                 'method': 'GET',
                 'headers': {},
@@ -58,6 +71,49 @@ class APITestWorker(QThread):
         
         for api_name, config in apis_to_test.items():
             start_time = __import__('time').time()
+            
+            # Special handling for WorkOS (uses diagnostics, not HTTP)
+            if config.get('type') == 'workos':
+                try:
+                    if self.diagnostics:
+                        workos_result = self.diagnostics.check_workos_health()
+                        elapsed_ms = workos_result.get('response_time_ms', 0)
+                        
+                        # Map diagnostics status to API test format
+                        status_map = {
+                            'healthy': 'Success',
+                            'degraded': 'Fail',
+                            'unreachable': 'Fail'
+                        }
+                        
+                        result = {
+                            'status': status_map.get(workos_result['status'], 'Fail'),
+                            'response_time': elapsed_ms,
+                            'status_code': None,
+                            'details': workos_result['details']
+                        }
+                    else:
+                        result = {
+                            'status': 'Fail',
+                            'response_time': 0,
+                            'status_code': None,
+                            'details': 'Diagnostics not available'
+                        }
+                    
+                    results[api_name] = result
+                    self.test_progress.emit(api_name, result)
+                    continue
+                except Exception as e:
+                    elapsed_ms = (__import__('time').time() - start_time) * 1000
+                    results[api_name] = {
+                        'status': 'Fail',
+                        'response_time': elapsed_ms,
+                        'details': f'WorkOS check error: {str(e)[:100]}'
+                    }
+                    self.test_progress.emit(api_name, results[api_name])
+                    continue
+            
+            # Standard HTTP API testing
             try:
                 url = config['url']
                 method = config['method']
@@ -133,29 +189,48 @@ class AdminDashboard(QMainWindow):
         self.maintenance_mode = get_maintenance_mode()
         self.diagnostics = get_diagnostics()
         
+        # Get current theme palette
+        self._palette = PennyColors.get_palette(theme_manager.current_theme)
+        
         self.setWindowTitle(f"Admin Dashboard - {username}")
         self.setMinimumSize(1400, 900)
-        self.setStyleSheet("""
-            QMainWindow {
-                background: #f8f9fa;
-            }
-            QTabWidget::pane {
-                border: 1px solid #dee2e6;
-                background: white;
-            }
-            QTabBar::tab {
-                background: #e9ecef;
-                padding: 10px 20px;
-                margin-right: 2px;
-            }
-            QTabBar::tab:selected {
-                background: #007bff;
-                color: white;
-            }
-        """)
+        self._apply_theme_styles()
         
         self.setup_ui()
         self.load_initial_data()
+    
+    def _apply_theme_styles(self):
+        """Apply PennyWise theme colors to admin dashboard"""
+        p = self._palette
+        
+        self.setStyleSheet(f"""
+            QMainWindow {{
+                background: {p['background']};
+            }}
+            QTabWidget::pane {{
+                border: 1px solid {p['border']};
+                background: {p['surface']};
+                border-radius: 8px;
+            }}
+            QTabBar::tab {{
+                background: {p.get('surface_alt', p['surface'])};
+                color: {p['text_secondary']};
+                padding: 12px 24px;
+                margin-right: 4px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                font-weight: 500;
+            }}
+            QTabBar::tab:selected {{
+                background: {p['surface']};
+                color: {p['text_primary']};
+                border-bottom: 2px solid #d6733a;
+            }}
+            QTabBar::tab:hover {{
+                background: {p['surface']};
+                color: {p['text_primary']};
+            }}
+        """)
     
     def setup_ui(self):
         """Setup the admin dashboard interface"""
@@ -185,21 +260,23 @@ class AdminDashboard(QMainWindow):
         self.statusBar().showMessage("Admin Dashboard Ready")
     
     def create_header(self):
-        """Create dashboard header"""
+        """Create dashboard header with PennyWise theme"""
+        p = self._palette
+        
         header_frame = QFrame()
-        header_frame.setStyleSheet("""
-            QFrame {
+        header_frame.setStyleSheet(f"""
+            QFrame {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                    stop:0 #007bff, stop:1 #0056b3);
+                    stop:0 #d6733a, stop:1 #b45131);
                 border-radius: 10px;
-                padding: 15px;
-            }
+                padding: 20px;
+            }}
         """)
         
         layout = QHBoxLayout(header_frame)
         
         # Title
-        title = QLabel("🔧 Admin Dashboard")
+        title = QLabel("Admin Dashboard")
         title.setFont(QFont("Segoe UI", 24, QFont.Bold))
         title.setStyleSheet("color: white;")
         layout.addWidget(title)
@@ -220,22 +297,23 @@ class AdminDashboard(QMainWindow):
         layout = QVBoxLayout(stats_widget)
         
         # Stats overview
+        p = self._palette
         stats_frame = QFrame()
-        stats_frame.setStyleSheet("""
-            QFrame {
-                background: white;
-                border: 1px solid #dee2e6;
-                border-radius: 10px;
-                padding: 20px;
-            }
+        stats_frame.setStyleSheet(f"""
+            QFrame {{
+                background: {p['surface']};
+                border: 1px solid {p['border']};
+                border-radius: 12px;
+                padding: 24px;
+            }}
         """)
         stats_layout = QGridLayout(stats_frame)
         
-        # Create stat cards
-        self.total_users_label = self.create_stat_card("Total Users", "0", "#007bff")
-        self.monthly_signups_label = self.create_stat_card("This Month", "0", "#28a745")
-        self.active_users_label = self.create_stat_card("Active Users", "0", "#ffc107")
-        self.new_today_label = self.create_stat_card("New Today", "0", "#17a2b8")
+        # Create stat cards with PennyWise colors
+        self.total_users_label = self.create_stat_card("Total Users", "0", "#d6733a")
+        self.monthly_signups_label = self.create_stat_card("This Month", "0", "#704b3b")
+        self.active_users_label = self.create_stat_card("Active Users", "0", "#b45131")
+        self.new_today_label = self.create_stat_card("New Today", "0", "#fdbd63")
         
         stats_layout.addWidget(self.total_users_label, 0, 0)
         stats_layout.addWidget(self.monthly_signups_label, 0, 1)
@@ -245,19 +323,22 @@ class AdminDashboard(QMainWindow):
         layout.addWidget(stats_frame)
         
         # User signup trends (simplified chart representation)
+        p = self._palette
         trends_frame = QFrame()
-        trends_frame.setStyleSheet("""
-            QFrame {
-                background: white;
-                border: 1px solid #dee2e6;
-                border-radius: 10px;
-                padding: 20px;
-            }
+        trends_frame.setStyleSheet(f"""
+            QFrame {{
+                background: {p['surface']};
+                border: 1px solid {p['border']};
+                border-radius: 12px;
+                padding: 24px;
+            }}
         """)
         trends_layout = QVBoxLayout(trends_frame)
         
+        p = self._palette
         trends_title = QLabel("User Signup Trends (Last 12 Months)")
         trends_title.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        trends_title.setStyleSheet(f"color: {p['text_primary']};")
         trends_layout.addWidget(trends_title)
         
         # Simple bar chart representation
@@ -280,38 +361,42 @@ class AdminDashboard(QMainWindow):
         controls_layout = QHBoxLayout()
         controls_layout.setSpacing(10)
         
-        test_all_btn = QPushButton("🧪 Test All APIs")
+        p = self._palette
+        test_all_btn = QPushButton("Test All APIs")
         test_all_btn.clicked.connect(self.test_all_apis)
-        test_all_btn.setStyleSheet("""
-            QPushButton {
-                background: #6f42c1;
+        test_all_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #d6733a, stop:1 #b45131);
                 color: white;
-                padding: 10px 20px;
+                padding: 12px 24px;
                 border: none;
-                border-radius: 5px;
+                border-radius: 6px;
                 font-weight: bold;
                 font-size: 14px;
-            }
-            QPushButton:hover {
-                background: #5a32a3;
-            }
-            QPushButton:disabled {
-                background: #cccccc;
-            }
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #e6824a, stop:1 #c56141);
+            }}
+            QPushButton:disabled {{
+                background: {p['muted']};
+                color: {p['text_secondary']};
+            }}
         """)
         
         self.test_progress = QProgressBar()
         self.test_progress.setVisible(False)
-        self.test_progress.setStyleSheet("""
-            QProgressBar {
-                border: 2px solid #6f42c1;
+        p = self._palette
+        self.test_progress.setStyleSheet(f"""
+            QProgressBar {{
+                border: 2px solid #d6733a;
                 border-radius: 5px;
                 text-align: center;
                 height: 25px;
-            }
-            QProgressBar::chunk {
-                background-color: #6f42c1;
-            }
+                background: {p['surface']};
+            }}
+            QProgressBar::chunk {{
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #d6733a, stop:1 #b45131);
+            }}
         """)
         
         controls_layout.addWidget(test_all_btn)
@@ -330,27 +415,30 @@ class AdminDashboard(QMainWindow):
         self.api_results_table.setAlternatingRowColors(True)
         self.api_results_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.api_results_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.api_results_table.setStyleSheet("""
-            QTableWidget {
-                border: 1px solid #dee2e6;
-                border-radius: 5px;
-                background: white;
-                gridline-color: #e9ecef;
-            }
-            QTableWidget::item {
-                padding: 8px;
-            }
-            QHeaderView::section {
-                background: #f8f9fa;
+        p = self._palette
+        self.api_results_table.setStyleSheet(f"""
+            QTableWidget {{
+                border: 1px solid {p['border']};
+                border-radius: 8px;
+                background: {p['surface']};
+                gridline-color: {p['border']};
+                color: {p['text_primary']};
+            }}
+            QTableWidget::item {{
                 padding: 10px;
+            }}
+            QHeaderView::section {{
+                background: {p.get('surface_alt', p['surface'])};
+                color: {p['text_primary']};
+                padding: 12px;
                 border: none;
-                border-bottom: 2px solid #dee2e6;
+                border-bottom: 2px solid {p['border']};
                 font-weight: bold;
-            }
+            }}
         """)
         
-        # Initialize table with API names
-        self.api_names = ['GROQ AI', 'Plaid Sandbox', 'Currency API']
+        # Initialize table with API names (including WorkOS)
+        self.api_names = ['WorkOS Auth', 'GROQ AI', 'Plaid Sandbox', 'Currency API']
         self.api_results_table.setRowCount(len(self.api_names))
         for row, api_name in enumerate(self.api_names):
             self.api_results_table.setItem(row, 0, QTableWidgetItem(api_name))
@@ -360,7 +448,8 @@ class AdminDashboard(QMainWindow):
             
             # Make API name clickable for individual testing
             name_item = self.api_results_table.item(row, 0)
-            name_item.setForeground(QColor(0, 102, 204))
+            p = self._palette
+            name_item.setForeground(QColor(p.get('primary', '#d6733a')))
             name_item.setToolTip("Click to test this API individually")
         
         # Connect double-click to test individual API
@@ -369,94 +458,116 @@ class AdminDashboard(QMainWindow):
         layout.addWidget(self.api_results_table)
         
         # Status label
+        p = self._palette
         self.api_status_label = QLabel("Ready to test APIs")
-        self.api_status_label.setStyleSheet("color: #6c757d; font-style: italic;")
+        self.api_status_label.setStyleSheet(f"color: {p['text_secondary']}; font-style: italic; padding: 8px;")
         layout.addWidget(self.api_status_label)
         
-        self.tab_widget.addTab(api_widget, "🔌 API Testing")
+        self.tab_widget.addTab(api_widget, "API Testing")
     
     def create_system_controls_tab(self):
-        """Create system controls tab (maintenance mode, WorkOS health)"""
+        """Create system controls tab (maintenance mode)"""
         controls_widget = QWidget()
         layout = QVBoxLayout(controls_widget)
         layout.setSpacing(20)
+        layout.setContentsMargins(0, 0, 0, 0)
         
-        # Emergency Shutdown Section
+        p = self._palette
+        
+        # Emergency Shutdown Section - Modern Card Design
         shutdown_frame = QFrame()
-        shutdown_frame.setStyleSheet("""
-            QFrame {
-                background: white;
-                border: 2px solid #dc3545;
-                border-radius: 10px;
-                padding: 20px;
-            }
+        shutdown_frame.setStyleSheet(f"""
+            QFrame {{
+                background: {p['surface']};
+                border: 2px solid #b45131;
+                border-radius: 12px;
+                padding: 24px;
+            }}
         """)
         shutdown_layout = QVBoxLayout(shutdown_frame)
+        shutdown_layout.setSpacing(16)
         
-        shutdown_title = QLabel("🚨 Emergency Shutdown / Maintenance Mode")
-        shutdown_title.setFont(QFont("Segoe UI", 18, QFont.Bold))
-        shutdown_title.setStyleSheet("color: #dc3545;")
+        shutdown_title = QLabel("Emergency Shutdown / Maintenance Mode")
+        shutdown_title.setFont(QFont("Segoe UI", 20, QFont.Bold))
+        shutdown_title.setStyleSheet(f"color: {p['text_primary']}; margin-bottom: 8px;")
         shutdown_layout.addWidget(shutdown_title)
         
         shutdown_desc = QLabel(
             "When enabled, all end users will see a maintenance screen. "
-            "Admins can still access the dashboard."
+            "Administrators can still access the dashboard and manage the system."
         )
         shutdown_desc.setWordWrap(True)
-        shutdown_desc.setStyleSheet("color: #666; margin: 10px 0;")
+        shutdown_desc.setStyleSheet(f"color: {p['text_secondary']}; margin-bottom: 16px; line-height: 1.5;")
         shutdown_layout.addWidget(shutdown_desc)
         
-        # Maintenance mode status
-        status_layout = QHBoxLayout()
+        # Maintenance mode status - Modern Status Badge
+        status_container = QFrame()
+        status_container.setStyleSheet(f"""
+            QFrame {{
+                background: {p.get('surface_alt', p['surface'])};
+                border-radius: 8px;
+                padding: 16px;
+            }}
+        """)
+        status_layout = QHBoxLayout(status_container)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        
         status_label = QLabel("Current Status:")
-        status_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        self.maintenance_status_label = QLabel()
-        self.maintenance_status_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        status_label.setFont(QFont("Segoe UI", 13))
+        status_label.setStyleSheet(f"color: {p['text_secondary']};")
         status_layout.addWidget(status_label)
+        
+        self.maintenance_status_label = QLabel()
+        self.maintenance_status_label.setFont(QFont("Segoe UI", 13, QFont.Bold))
         status_layout.addWidget(self.maintenance_status_label)
         status_layout.addStretch()
-        shutdown_layout.addLayout(status_layout)
         
-        # Toggle buttons
+        shutdown_layout.addWidget(status_container)
+        
+        # Toggle buttons - Modern Design
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(12)
+        
         self.enable_maintenance_btn = QPushButton("Enable Maintenance Mode")
         self.enable_maintenance_btn.clicked.connect(self.enable_maintenance_mode)
-        self.enable_maintenance_btn.setStyleSheet("""
-            QPushButton {
-                background: #dc3545;
+        self.enable_maintenance_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #b45131, stop:1 #8a3e25);
                 color: white;
-                padding: 12px 24px;
+                padding: 14px 28px;
                 border: none;
-                border-radius: 5px;
+                border-radius: 8px;
                 font-weight: bold;
                 font-size: 14px;
-            }
-            QPushButton:hover {
-                background: #c82333;
-            }
-            QPushButton:disabled {
-                background: #cccccc;
-            }
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #c56141, stop:1 #9a4e35);
+            }}
+            QPushButton:disabled {{
+                background: {p['muted']};
+                color: {p['text_secondary']};
+            }}
         """)
         
         self.disable_maintenance_btn = QPushButton("Disable Maintenance Mode")
         self.disable_maintenance_btn.clicked.connect(self.disable_maintenance_mode)
-        self.disable_maintenance_btn.setStyleSheet("""
-            QPushButton {
-                background: #28a745;
+        self.disable_maintenance_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #d6733a, stop:1 #b45131);
                 color: white;
-                padding: 12px 24px;
+                padding: 14px 28px;
                 border: none;
-                border-radius: 5px;
+                border-radius: 8px;
                 font-weight: bold;
                 font-size: 14px;
-            }
-            QPushButton:hover {
-                background: #218838;
-            }
-            QPushButton:disabled {
-                background: #cccccc;
-            }
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #e6824a, stop:1 #c56141);
+            }}
+            QPushButton:disabled {{
+                background: {p['muted']};
+                color: {p['text_secondary']};
+            }}
         """)
         
         button_layout.addWidget(self.enable_maintenance_btn)
@@ -468,68 +579,23 @@ class AdminDashboard(QMainWindow):
         self.update_maintenance_status()
         
         layout.addWidget(shutdown_frame)
-        
-        # WorkOS Health Check Section
-        workos_frame = QFrame()
-        workos_frame.setStyleSheet("""
-            QFrame {
-                background: white;
-                border: 1px solid #dee2e6;
-                border-radius: 10px;
-                padding: 20px;
-            }
-        """)
-        workos_layout = QVBoxLayout(workos_frame)
-        
-        workos_title = QLabel("🔐 WorkOS Auth Service Health")
-        workos_title.setFont(QFont("Segoe UI", 18, QFont.Bold))
-        workos_layout.addWidget(workos_title)
-        
-        workos_desc = QLabel(
-            "Check WorkOS API connectivity and configuration without performing OAuth."
-        )
-        workos_desc.setWordWrap(True)
-        workos_desc.setStyleSheet("color: #666; margin: 10px 0;")
-        workos_layout.addWidget(workos_desc)
-        
-        # WorkOS status display
-        self.workos_status_label = QLabel("Click 'Check WorkOS Status' to test")
-        self.workos_status_label.setStyleSheet("color: #6c757d; font-style: italic; padding: 10px;")
-        workos_layout.addWidget(self.workos_status_label)
-        
-        # Check button
-        check_workos_btn = QPushButton("Check WorkOS Status")
-        check_workos_btn.clicked.connect(self.check_workos_health)
-        check_workos_btn.setStyleSheet("""
-            QPushButton {
-                background: #007bff;
-                color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 5px;
-                font-weight: bold;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background: #0056b3;
-            }
-        """)
-        workos_layout.addWidget(check_workos_btn)
-        
-        layout.addWidget(workos_frame)
         layout.addStretch()
         
-        self.tab_widget.addTab(controls_widget, "⚙️ System Controls")
+        self.tab_widget.addTab(controls_widget, "System Controls")
     
     def create_diagnostics_tab(self):
         """Create system diagnostics tab"""
         diag_widget = QWidget()
         layout = QVBoxLayout(diag_widget)
-        layout.setSpacing(15)
+        layout.setSpacing(20)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        p = self._palette
         
         # Header
-        header_label = QLabel("🔍 System Diagnostics")
-        header_label.setFont(QFont("Segoe UI", 18, QFont.Bold))
+        header_label = QLabel("System Diagnostics")
+        header_label.setFont(QFont("Segoe UI", 20, QFont.Bold))
+        header_label.setStyleSheet(f"color: {p['text_primary']}; margin-bottom: 8px;")
         layout.addWidget(header_label)
         
         desc_label = QLabel(
@@ -537,25 +603,25 @@ class AdminDashboard(QMainWindow):
             "or internal (database, threads, UI)."
         )
         desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("color: #666; margin-bottom: 10px;")
+        desc_label.setStyleSheet(f"color: {p['text_secondary']}; margin-bottom: 16px; line-height: 1.5;")
         layout.addWidget(desc_label)
         
         # Run diagnostics button
-        run_diag_btn = QPushButton("🔄 Run All Diagnostics")
+        run_diag_btn = QPushButton("Run All Diagnostics")
         run_diag_btn.clicked.connect(self.run_diagnostics)
-        run_diag_btn.setStyleSheet("""
-            QPushButton {
-                background: #6f42c1;
+        run_diag_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #d6733a, stop:1 #b45131);
                 color: white;
-                padding: 12px 24px;
+                padding: 14px 28px;
                 border: none;
-                border-radius: 5px;
+                border-radius: 8px;
                 font-weight: bold;
                 font-size: 14px;
-            }
-            QPushButton:hover {
-                background: #5a32a3;
-            }
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #e6824a, stop:1 #c56141);
+            }}
         """)
         layout.addWidget(run_diag_btn)
         
@@ -570,50 +636,55 @@ class AdminDashboard(QMainWindow):
         self.diagnostics_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.diagnostics_table.setAlternatingRowColors(True)
         self.diagnostics_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.diagnostics_table.setStyleSheet("""
-            QTableWidget {
-                border: 1px solid #dee2e6;
-                border-radius: 5px;
-                background: white;
-                gridline-color: #e9ecef;
-            }
-            QTableWidget::item {
-                padding: 8px;
-            }
-            QHeaderView::section {
-                background: #f8f9fa;
+        p = self._palette
+        self.diagnostics_table.setStyleSheet(f"""
+            QTableWidget {{
+                border: 1px solid {p['border']};
+                border-radius: 8px;
+                background: {p['surface']};
+                gridline-color: {p['border']};
+                color: {p['text_primary']};
+            }}
+            QTableWidget::item {{
                 padding: 10px;
+            }}
+            QHeaderView::section {{
+                background: {p.get('surface_alt', p['surface'])};
+                color: {p['text_primary']};
+                padding: 12px;
                 border: none;
-                border-bottom: 2px solid #dee2e6;
+                border-bottom: 2px solid {p['border']};
                 font-weight: bold;
-            }
+            }}
         """)
         layout.addWidget(self.diagnostics_table)
         
         # Last exception display
         exception_frame = QFrame()
-        exception_frame.setStyleSheet("""
-            QFrame {
-                background: #fff3cd;
-                border: 1px solid #ffc107;
-                border-radius: 5px;
-                padding: 15px;
-            }
+        p = self._palette
+        exception_frame.setStyleSheet(f"""
+            QFrame {{
+                background: {p.get('surface_alt', p['surface'])};
+                border: 1px solid #fdbd63;
+                border-radius: 8px;
+                padding: 16px;
+            }}
         """)
         exception_layout = QVBoxLayout(exception_frame)
         
-        exception_title = QLabel("⚠️ Last Uncaught Exception")
+        exception_title = QLabel("Last Uncaught Exception")
         exception_title.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        exception_title.setStyleSheet(f"color: {p['text_primary']}; margin-bottom: 8px;")
         exception_layout.addWidget(exception_title)
         
         self.exception_label = QLabel("No exceptions recorded")
         self.exception_label.setWordWrap(True)
-        self.exception_label.setStyleSheet("color: #856404;")
+        self.exception_label.setStyleSheet(f"color: {p['text_secondary']}; font-family: 'Consolas', monospace;")
         exception_layout.addWidget(self.exception_label)
         
         layout.addWidget(exception_frame)
         
-        self.tab_widget.addTab(diag_widget, "🔬 Diagnostics")
+        self.tab_widget.addTab(diag_widget, "Diagnostics")
     
     def create_user_search_tab(self):
         """Create user search tab"""
@@ -628,20 +699,21 @@ class AdminDashboard(QMainWindow):
         self.search_input.setPlaceholderText("Enter username, email, or user ID...")
         self.search_input.returnPressed.connect(self.search_users)
         
+        p = self._palette
         search_btn = QPushButton("Search")
         search_btn.clicked.connect(self.search_users)
-        search_btn.setStyleSheet("""
-            QPushButton {
-                background: #007bff;
+        search_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #d6733a, stop:1 #b45131);
                 color: white;
-                padding: 8px 16px;
+                padding: 10px 20px;
                 border: none;
-                border-radius: 5px;
+                border-radius: 6px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background: #0056b3;
-            }
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #e6824a, stop:1 #c56141);
+            }}
         """)
         
         search_layout.addWidget(search_label)
@@ -662,7 +734,7 @@ class AdminDashboard(QMainWindow):
         
         layout.addWidget(self.users_table)
         
-        self.tab_widget.addTab(search_widget, "👤 User Search")
+        self.tab_widget.addTab(search_widget, "User Search")
     
     def create_stat_card(self, title, value, color):
         """Create a statistics card"""
@@ -779,7 +851,7 @@ class AdminDashboard(QMainWindow):
         self.api_status_label.setText("Testing all APIs...")
         self.api_status_label.setStyleSheet("color: #6f42c1; font-weight: bold;")
         
-        self.api_worker = APITestWorker()
+        self.api_worker = APITestWorker(diagnostics=self.diagnostics)
         self.api_worker.test_completed.connect(self.on_api_test_completed)
         self.api_worker.test_progress.connect(self.on_api_test_progress)
         self.api_worker.start()
@@ -803,10 +875,11 @@ class AdminDashboard(QMainWindow):
         
         self.test_progress.setVisible(True)
         self.test_progress.setRange(0, 0)
+        p = self._palette
         self.api_status_label.setText(f"Testing {api_name}...")
-        self.api_status_label.setStyleSheet("color: #6f42c1; font-weight: bold;")
+        self.api_status_label.setStyleSheet(f"color: #d6733a; font-weight: bold;")
         
-        self.api_worker = APITestWorker(api_name=api_name)
+        self.api_worker = APITestWorker(api_name=api_name, diagnostics=self.diagnostics)
         self.api_worker.test_completed.connect(self.on_api_test_completed)
         self.api_worker.test_progress.connect(self.on_api_test_progress)
         self.api_worker.start()
@@ -868,11 +941,12 @@ class AdminDashboard(QMainWindow):
         success_count = sum(1 for r in results.values() if isinstance(r, dict) and r.get('status') == 'Success')
         total_count = len(results)
         
+        p = self._palette
         self.api_status_label.setText(f"Testing completed: {success_count}/{total_count} APIs successful")
         if success_count == total_count:
-            self.api_status_label.setStyleSheet("color: #28a745; font-weight: bold;")
+            self.api_status_label.setStyleSheet(f"color: {p.get('success', '#704b3b')}; font-weight: bold;")
         else:
-            self.api_status_label.setStyleSheet("color: #dc3545; font-weight: bold;")
+            self.api_status_label.setStyleSheet(f"color: #b45131; font-weight: bold;")
         
         self.statusBar().showMessage(f"API testing completed: {success_count}/{total_count} successful")
     
@@ -927,15 +1001,16 @@ class AdminDashboard(QMainWindow):
     
     def update_maintenance_status(self):
         """Update the maintenance mode status display"""
+        p = self._palette
         is_enabled = self.maintenance_mode.is_enabled()
         if is_enabled:
             self.maintenance_status_label.setText("ENABLED")
-            self.maintenance_status_label.setStyleSheet("color: #dc3545;")
+            self.maintenance_status_label.setStyleSheet(f"color: #b45131; background: rgba(180, 81, 49, 0.1); padding: 6px 12px; border-radius: 6px;")
             self.enable_maintenance_btn.setEnabled(False)
             self.disable_maintenance_btn.setEnabled(True)
         else:
             self.maintenance_status_label.setText("DISABLED")
-            self.maintenance_status_label.setStyleSheet("color: #28a745;")
+            self.maintenance_status_label.setStyleSheet(f"color: #704b3b; background: rgba(112, 75, 59, 0.1); padding: 6px 12px; border-radius: 6px;")
             self.enable_maintenance_btn.setEnabled(True)
             self.disable_maintenance_btn.setEnabled(False)
     
@@ -981,45 +1056,6 @@ class AdminDashboard(QMainWindow):
                 "Error",
                 "Failed to disable maintenance mode. Check logs for details."
             )
-    
-    def check_workos_health(self):
-        """Check WorkOS API health"""
-        self.workos_status_label.setText("Checking WorkOS status...")
-        self.workos_status_label.setStyleSheet("color: #6c757d; font-style: italic;")
-        
-        # Run check in a thread to avoid blocking UI
-        from PyQt5.QtCore import QTimer
-        QTimer.singleShot(100, self._perform_workos_check)
-    
-    def _perform_workos_check(self):
-        """Perform the actual WorkOS health check"""
-        try:
-            result = self.diagnostics.check_workos_health()
-            
-            status = result['status']
-            details = result['details']
-            response_time = result.get('response_time_ms', 0)
-            
-            if status == 'healthy':
-                status_text = f"✅ HEALTHY - {details}"
-                if response_time > 0:
-                    status_text += f" (Response time: {response_time:.2f}ms)"
-                self.workos_status_label.setText(status_text)
-                self.workos_status_label.setStyleSheet("color: #28a745; font-weight: bold; padding: 10px;")
-            elif status == 'degraded':
-                status_text = f"⚠️ DEGRADED - {details}"
-                if response_time > 0:
-                    status_text += f" (Response time: {response_time:.2f}ms)"
-                self.workos_status_label.setText(status_text)
-                self.workos_status_label.setStyleSheet("color: #ffc107; font-weight: bold; padding: 10px;")
-            else:  # unreachable
-                status_text = f"❌ UNREACHABLE - {details}"
-                self.workos_status_label.setText(status_text)
-                self.workos_status_label.setStyleSheet("color: #dc3545; font-weight: bold; padding: 10px;")
-                
-        except Exception as e:
-            self.workos_status_label.setText(f"❌ Error checking WorkOS: {str(e)[:200]}")
-            self.workos_status_label.setStyleSheet("color: #dc3545; font-weight: bold; padding: 10px;")
     
     def run_diagnostics(self):
         """Run all diagnostic checks"""

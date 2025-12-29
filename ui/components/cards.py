@@ -34,16 +34,6 @@ class CardWidget(QFrame):
             if self.title:
                 self.title_label = QLabel(self.title)
                 self.title_label.setProperty("class", "card-title")
-                # #region agent log
-                import json
-                from datetime import datetime
-                try:
-                    scale = get_font_scale()
-                    scaled_size = int(16 * scale)
-                    with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                        f.write(json.dumps({"location":"cards.py:36","message":"CardWidget title font set SCALED","data":{"title":self.title,"base_size":16,"scale":scale,"scaled_size":scaled_size},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+'\n')
-                except: pass
-                # #endregion
                 # Scale font based on current font size setting
                 scaled_title_size = int(16 * get_font_scale())
                 self.title_label.setFont(QFont("Segoe UI", scaled_title_size, QFont.Bold))
@@ -52,14 +42,6 @@ class CardWidget(QFrame):
             if self.subtitle:
                 self.subtitle_label = QLabel(self.subtitle)
                 self.subtitle_label.setProperty("class", "card-subtitle")
-                # #region agent log
-                try:
-                    scale = get_font_scale()
-                    scaled_size = int(12 * scale)
-                    with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                        f.write(json.dumps({"location":"cards.py:51","message":"CardWidget subtitle font set SCALED","data":{"subtitle":self.subtitle,"base_size":12,"scale":scale,"scaled_size":scaled_size},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+'\n')
-                except: pass
-                # #endregion
                 # Scale font based on current font size setting
                 scaled_subtitle_size = int(12 * get_font_scale())
                 self.subtitle_label.setFont(QFont("Segoe UI", scaled_subtitle_size))

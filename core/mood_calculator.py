@@ -87,13 +87,6 @@ class MoodCalculator:
                 spend_ratio = spending / income
             except:
                 spend_ratio = 0.0
-            
-            # #region agent log
-            try:
-                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                    f.write(json.dumps({"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"A","location":"mood_calculator.py:calculate_overall_mood","message":"Mood calculation with commitment checks","data":{"unpaid_count":unpaid_count,"overdue_count":overdue_count,"spend_ratio":round(spend_ratio,2),"final_mood":mood_level,"mood_score":mood_score},"timestamp":int(time.time()*1000)}) + '\n')
-            except: pass
-            # #endregion
 
             mood_data = {
                 'score': mood_score,

@@ -321,23 +321,37 @@ class WorkOSAuthenticator:
                     # Signal that server thread has started
                     server_ready.set()
                     
-                    # Start listening immediately - call handle_request() to accept connections
-                    # This ensures server is ready before browser opens
+                    # Ensure server socket is bound and listening
+                    # HTTPServer binds on creation, but we need to verify it's ready
                     import socket
-                    # Verify server socket is bound and listening
                     if hasattr(self.server, 'socket') and self.server.socket:
                         server_listening.set()
+                        logger.debug(f"Server socket bound on port {port}")
                     
-                    max_requests = 10  # Limit requests to prevent infinite loop
+                    max_requests = 30  # Increased limit for reliability
                     request_count = 0
-                    # Use short timeout so we can check callback_received frequently
+                    # Use longer timeout to allow connections to establish
                     original_timeout = self.server.timeout
-                    self.server.timeout = 1.0  # 1 second timeout for handle_request()
+                    self.server.timeout = 3.0  # 3 second timeout for handle_request()
+                    
+                    # Keep handling requests until callback received or max requests
                     while not self.callback_received and request_count < max_requests:
-                        self.server.handle_request()
+                        try:
+                            # handle_request() blocks until a request arrives or timeout
+                            self.server.handle_request()
+                            logger.debug(f"Handled request {request_count + 1}")
+                        except Exception as req_error:
+                            # Log but continue - might be connection reset or similar
+                            logger.debug(f"Request handling error (non-fatal): {req_error}")
                         request_count += 1
+                        
+                        # Small delay to prevent tight loop if no requests
+                        if not self.callback_received:
+                            time.sleep(0.05)
+                    
                     # Restore original timeout
                     self.server.timeout = original_timeout
+                    logger.info(f"Callback server finished after {request_count} requests")
                 except OSError as e:
                     if "Address already in use" in str(e):
                         logger.error(f"Port {port} is already in use")
@@ -345,10 +359,13 @@ class WorkOSAuthenticator:
                         logger.error(f"Error in callback server: {e}")
                 except Exception as e:
                     logger.error(f"Unexpected error in callback server: {e}")
+                    import traceback
+                    logger.debug(traceback.format_exc())
                 finally:
                     if self.server:
                         try:
                             self.server.server_close()
+                            logger.debug("Server socket closed")
                         except:
                             pass
             
@@ -356,29 +373,32 @@ class WorkOSAuthenticator:
             self.server_thread.start()
             
             # Wait for server thread to start
-            server_ready.wait(timeout=2.0)
+            if not server_ready.wait(timeout=2.0):
+                logger.warning("Server thread did not start in time")
             
             # Verify server is actually listening on the port before opening browser
             import socket
-            max_wait = 2.0
+            max_wait = 3.0  # Increased wait time
             waited = 0
+            server_verified = False
             while waited < max_wait:
                 try:
                     test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    test_sock.settimeout(0.1)
+                    test_sock.settimeout(0.2)
                     result = test_sock.connect_ex(('localhost', port))
                     test_sock.close()
                     if result == 0:
                         # Port is open and accepting connections
-                        logger.info(f"Started OAuth callback server on http://localhost:{port}/authenticate")
+                        server_verified = True
+                        logger.info(f"OAuth callback server verified listening on http://localhost:{port}/authenticate")
                         break
-                except Exception:
-                    pass
-                time.sleep(0.1)
-                waited += 0.1
-            else:
-                # Server didn't start listening in time
-                logger.warning(f"Server may not be listening on port {port}, but proceeding anyway")
+                except Exception as e:
+                    logger.debug(f"Port check error: {e}")
+                time.sleep(0.2)
+                waited += 0.2
+            
+            if not server_verified:
+                logger.warning(f"Could not verify server is listening on port {port}, but proceeding anyway")
             
         except OSError as e:
             logger.error(f"Failed to start callback server on port {port}: {e}")
@@ -424,6 +444,9 @@ class WorkOSAuthenticator:
         except Exception as e:
             logger.error(f"Failed to start callback server: {e}")
             return None
+        
+        # Small delay to ensure server is fully ready before opening browser
+        time.sleep(0.5)
         
         # Open browser
         try:

@@ -519,15 +519,6 @@ class CommitmentForm(QDialog):
 
     def save_commitment(self):
         """Save commitment based on selected payment detection method"""
-        # #region agent log
-        import json as _json
-        import time as _time
-        try:
-            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(_json.dumps({"sessionId":"debug-session","runId":"balances-pre-fix","hypothesisId":"H4","location":"commitment_form.py:save_commitment","message":"save_commitment invoked","data":{"user_id":getattr(self,'user_id',None)}, "timestamp":int(_time.time()*1000)}) + "\n")
-        except Exception:
-            pass
-        # #endregion
         try:
             # Validate inputs
             name = self.name_input.text().strip()

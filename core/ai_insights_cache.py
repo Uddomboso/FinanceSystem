@@ -176,11 +176,4 @@ def _get_financial_context(user_id):
         'unpaid_commitment_count': len(unpaid_commitments)
     }
     
-    # #region agent log
-    try:
-        with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-            f.write(json.dumps({"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"A","location":"ai_insights_cache.py:_get_financial_context","message":"Category filtering and prioritization","data":{"total_spending":total_spending,"min_threshold":min_threshold,"significant_count":len(significant_categories),"commitment_count":len(commitment_categories),"final_categories":all_categories[:5],"commitment_categories":commitment_categories},"timestamp":int(time.time()*1000)}) + '\n')
-    except: pass
-    # #endregion
-    
     return context

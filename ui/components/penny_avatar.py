@@ -159,13 +159,6 @@ class PennyAvatar(QLabel):
         is_downturned = self.current_emotion in downturned_expressions
         is_upturned = self.current_emotion in upturned_expressions
         
-        # #region agent log
-        try:
-            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"A","location":"penny_avatar.py:_draw_emotional_mouth","message":"Drawing mouth expression","data":{"emotion":self.current_emotion,"is_downturned":is_downturned,"is_upturned":is_upturned},"timestamp":int(time.time()*1000)}) + '\n')
-        except: pass
-        # #endregion
-        
         if is_downturned:
             # Downturned mouth (frown) for strict/alert expressions
             painter.drawArc(

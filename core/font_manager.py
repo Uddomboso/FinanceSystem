@@ -37,15 +37,6 @@ def apply_font_size(size_label):
     """
     global _current_font_size
     
-    # #region agent log
-    import json
-    from datetime import datetime
-    try:
-        with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-            f.write(json.dumps({"location":"font_manager.py:28","message":"apply_font_size called","data":{"size_label":size_label,"valid":size_label in FONT_SIZES},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","runId":"run1","hypothesisId":"A,D,E"})+'\n')
-    except: pass
-    # #endregion
-    
     # Validate and default to Medium if invalid
     if size_label not in FONT_SIZES:
         size_label = DEFAULT_SIZE
@@ -56,27 +47,12 @@ def apply_font_size(size_label):
     # Get the font size in points
     size_points = FONT_SIZES[size_label]
     
-    # #region agent log
-    try:
-        with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-            f.write(json.dumps({"location":"font_manager.py:45","message":"applying font size","data":{"size_label":size_label,"size_points":size_points,"scale":FONT_SCALES[size_label]},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","runId":"run1","hypothesisId":"A,D,E"})+'\n')
-    except: pass
-    # #endregion
-    
     # Get the application instance
     app = QApplication.instance()
     if app:
         # Create a new font with the specified size
         font = QFont("Segoe UI", size_points)
         app.setFont(font)
-        
-        # #region agent log
-        try:
-            widget_count = len(list(app.allWidgets()))
-            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"location":"font_manager.py:58","message":"updating widgets","data":{"widget_count":widget_count},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","runId":"run1","hypothesisId":"D,E"})+'\n')
-        except: pass
-        # #endregion
         
         # Force update all widgets
         for widget in app.allWidgets():
@@ -109,16 +85,6 @@ def get_font_scale(size_label=None):
     """
     if size_label is None:
         size_label = _current_font_size
-    
-    # #region agent log
-    import json
-    from datetime import datetime
-    try:
-        scale = FONT_SCALES.get(size_label, FONT_SCALES[DEFAULT_SIZE])
-        with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-            f.write(json.dumps({"location":"font_manager.py:87","message":"get_font_scale called","data":{"size_label":size_label,"scale":scale},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","runId":"run1","hypothesisId":"A,B,C"})+'\n')
-    except: pass
-    # #endregion
     
     return FONT_SCALES.get(size_label, FONT_SCALES[DEFAULT_SIZE])
 

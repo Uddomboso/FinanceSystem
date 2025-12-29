@@ -78,6 +78,16 @@ class MaintenanceMode:
         max_retries = 3
         retry_delay = 0.5
         
+        # First check if table exists
+        try:
+            table_check = fetch_one("SELECT name FROM sqlite_master WHERE type='table' AND name='maintenance_mode'")
+            if not table_check:
+                logger.warning("maintenance_mode table does not exist, returning False")
+                return False
+        except Exception as e:
+            logger.warning(f"Could not check if maintenance_mode table exists: {e}")
+            return False
+        
         for attempt in range(max_retries):
             try:
                 result = fetch_one("SELECT enabled FROM maintenance_mode WHERE id = 1")
@@ -149,6 +159,11 @@ class MaintenanceMode:
     def get_message(self) -> str:
         """Get the current maintenance message"""
         try:
+            # Check if table exists first
+            table_check = fetch_one("SELECT name FROM sqlite_master WHERE type='table' AND name='maintenance_mode'")
+            if not table_check:
+                return "PennyWise is temporarily unavailable due to maintenance."
+            
             result = fetch_one("SELECT message FROM maintenance_mode WHERE id = 1")
             return result['message'] if result and result['message'] else \
                 "PennyWise is temporarily unavailable due to maintenance."
@@ -159,11 +174,14 @@ class MaintenanceMode:
 
 # Global singleton instance getter
 _maintenance_mode = None
+_maintenance_mode_lock = threading.Lock()
 
 def get_maintenance_mode() -> MaintenanceMode:
-    """Get the global maintenance mode instance"""
+    """Get the global maintenance mode instance (thread-safe singleton)"""
     global _maintenance_mode
     if _maintenance_mode is None:
-        _maintenance_mode = MaintenanceMode()
+        with _maintenance_mode_lock:
+            if _maintenance_mode is None:
+                _maintenance_mode = MaintenanceMode()
     return _maintenance_mode
 

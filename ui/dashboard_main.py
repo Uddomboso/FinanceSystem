@@ -898,14 +898,6 @@ class MetricsCarousel(QWidget):
 
         # Title label - make sure it's visible
         title_label = QLabel(title)
-        # #region agent log
-        import json
-        from datetime import datetime
-        try:
-            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"location":"dashboard_main.py:914","message":"finance card title created SCALED","data":{"title":title,"base_size":16,"scale":font_scale,"scaled_size":title_font_size},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+'\n')
-        except: pass
-        # #endregion
         title_label.setStyleSheet(f"""
             QLabel {{
                 color: {theme_color('text_primary')};
@@ -919,12 +911,6 @@ class MetricsCarousel(QWidget):
 
         # Value label - make sure it's visible and large
         value_label = QLabel(value)
-        # #region agent log
-        try:
-            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"location":"dashboard_main.py:939","message":"finance card value created SCALED","data":{"value":value,"base_size":42,"scale":font_scale,"scaled_size":value_font_size},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+'\n')
-        except: pass
-        # #endregion
         value_label.setStyleSheet(f"""
             QLabel {{
                 color: {color};
@@ -2687,6 +2673,12 @@ class DashboardMain(QMainWindow):
             # Initialize notification data
             self.notification_manager.recompute()
 
+        # Maintenance mode check - MUST be initialized BEFORE setup_ui() which calls create_pages()
+        self.maintenance_mode = get_maintenance_mode()
+        self.maintenance_check_timer = QTimer()
+        self.maintenance_check_timer.timeout.connect(self._check_and_show_maintenance)
+        self.maintenance_check_timer.start(5000)  # Check every 5 seconds
+
         self.setup_window()
         self.setup_ui()
         self.setup_animations()
@@ -2702,11 +2694,7 @@ class DashboardMain(QMainWindow):
         # Admin dashboard window reference (separate window, not embedded)
         self._admin_window = None
         
-        # Maintenance mode check
-        self.maintenance_mode = get_maintenance_mode()
-        self.maintenance_check_timer = QTimer()
-        self.maintenance_check_timer.timeout.connect(self._check_and_show_maintenance)
-        self.maintenance_check_timer.start(5000)  # Check every 5 seconds
+        # Initial maintenance check after UI is set up
         self._check_and_show_maintenance()
 
     def is_admin(self):
@@ -3028,15 +3016,6 @@ class DashboardMain(QMainWindow):
         - No partial refresh, no try/except hiding errors
         """
         from database.db_manager import fetch_one
-        # #region agent log
-        import json as _json
-        import time as _time
-        try:
-            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(_json.dumps({"sessionId":"debug-session","runId":"balances-pre-fix","hypothesisId":"H1,H3","location":"dashboard_main.py:update_balance_cards_from_db","message":"update_balance_cards_from_db called","data":{"user_id":getattr(self,'user_id',None)}, "timestamp":int(_time.time()*1000)}) + "\n")
-        except Exception:
-            pass
-        # #endregion
         checking_balance_row = fetch_one("""
             SELECT SUM(
                 CASE 
@@ -3057,13 +3036,6 @@ class DashboardMain(QMainWindow):
             WHERE user_id = ? AND COALESCE(is_paid, 0) = 0
         """, (self.user_id,))
         unpaid_sum = float(unpaid_row["total"] if unpaid_row and unpaid_row["total"] is not None else 0)
-        # #region agent log
-        try:
-            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(_json.dumps({"sessionId":"debug-session","runId":"balances-pre-fix","hypothesisId":"H1,H3","location":"dashboard_main.py:update_balance_cards_from_db","message":"db recompute values","data":{"raw_balance":raw_balance,"unpaid_sum":unpaid_sum,"computed_after":(raw_balance-unpaid_sum)}, "timestamp":int(_time.time()*1000)}) + "\n")
-        except Exception:
-            pass
-        # #endregion
         available_balance = max(0, raw_balance)
         balance_after_commitments = max(0, raw_balance - unpaid_sum)
         user_currency = fetch_one("SELECT currency FROM settings WHERE user_id = ?", (self.user_id,))
@@ -3874,16 +3846,6 @@ class DashboardMain(QMainWindow):
                 WHERE account_id = ? AND user_id = ?
             """, (account_id, self.user_id), commit=True)
             
-            # #region agent log
-            import json as _json
-            import time as _time
-            try:
-                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                    f.write(_json.dumps({"sessionId":"debug-session","runId":"task4","hypothesisId":"T4","location":"dashboard_main.py:set_as_main_account","message":"updated UI flags only","data":{"account_id":account_id,"updated_is_primary":1,"note":"account_type updated for display, Plaid remains source of truth"}, "timestamp":int(_time.time()*1000)}) + "\n")
-            except Exception:
-                pass
-            # #endregion
-            
             # Refresh dashboard
             self.refresh_dashboard()
             self.refresh_metrics_cards_main()
@@ -3906,16 +3868,6 @@ class DashboardMain(QMainWindow):
     def set_as_savings_account(self, account_id):
         """Set an account as the savings account - ONLY if it's already a savings account from Plaid"""
         try:
-            # #region agent log
-            import json as _json
-            import time as _time
-            try:
-                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                    f.write(_json.dumps({"sessionId":"debug-session","runId":"accounts-pre-fix","hypothesisId":"H2","location":"dashboard_main.py:set_as_savings_account","message":"set_as_savings_account called","data":{"account_id":account_id,"user_id":self.user_id}, "timestamp":int(_time.time()*1000)}) + "\n")
-            except Exception:
-                pass
-            # #endregion
-            
             from database.migrations.add_institution_migration import apply_institution_migration
             apply_institution_migration()
             
@@ -3943,14 +3895,6 @@ class DashboardMain(QMainWindow):
                 account_type = None
                 plaid_token = None
             
-            # #region agent log
-            try:
-                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                    f.write(_json.dumps({"sessionId":"debug-session","runId":"accounts-pre-fix","hypothesisId":"H2","location":"dashboard_main.py:set_as_savings_account","message":"account found before update","data":{"account_id":account_id,"current_type":account_type,"has_plaid_token":bool(plaid_token)}, "timestamp":int(_time.time()*1000)}) + "\n")
-            except Exception:
-                pass
-            # #endregion
-            
             # Unset all primary savings accounts first
             execute_query("""
                 UPDATE accounts 
@@ -3964,22 +3908,6 @@ class DashboardMain(QMainWindow):
                 SET is_primary = 1, account_type = 'savings'
                 WHERE account_id = ? AND user_id = ?
             """, (account_id, self.user_id), commit=True)
-            
-            # #region agent log
-            try:
-                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                    f.write(_json.dumps({"sessionId":"debug-session","runId":"task4","hypothesisId":"T4","location":"dashboard_main.py:set_as_savings_account","message":"updated UI flags only","data":{"account_id":account_id,"updated_is_primary":1,"note":"account_type updated for display, Plaid remains source of truth"}, "timestamp":int(_time.time()*1000)}) + "\n")
-            except Exception:
-                pass
-            # #endregion
-            
-            # #region agent log
-            try:
-                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                    f.write(_json.dumps({"sessionId":"debug-session","runId":"accounts-pre-fix","hypothesisId":"H2","location":"dashboard_main.py:set_as_savings_account","message":"account updated (preserved type)","data":{"account_id":account_id,"preserved_type":"savings"}, "timestamp":int(_time.time()*1000)}) + "\n")
-            except Exception:
-                pass
-            # #endregion
             
             # Refresh accounts page immediately to reflect the change
             # This rebuilds the page with fresh data from database
@@ -4015,16 +3943,6 @@ class DashboardMain(QMainWindow):
             try:
                 # TASK 4: Accounts are read-only from Plaid - removal is allowed for UI cleanup
                 # but account will be re-added if Plaid connection is refreshed
-                # #region agent log
-                import json as _json
-                import time as _time
-                try:
-                    with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                        f.write(_json.dumps({"sessionId":"debug-session","runId":"task4","hypothesisId":"T4","location":"dashboard_main.py:remove_account","message":"removing account (will be re-added from Plaid on refresh)","data":{"account_id":account_id,"note":"account is read-only from Plaid, removal is temporary"}, "timestamp":int(_time.time()*1000)}) + "\n")
-                except Exception:
-                    pass
-                # #endregion
-                
                 execute_query("""
                     DELETE FROM accounts 
                     WHERE account_id = ? AND user_id = ?
@@ -4700,26 +4618,34 @@ class DashboardMain(QMainWindow):
             return False
         
         # End users see maintenance screen if maintenance mode is enabled
+        if not hasattr(self, 'maintenance_mode'):
+            return False
         return self.maintenance_mode.is_enabled()
     
     def _check_and_show_maintenance(self):
         """Check maintenance mode and show appropriate view"""
         if self._should_show_maintenance():
-            # Show maintenance view
-            if hasattr(self, 'page_maintenance'):
-                self.stack.setCurrentWidget(self.page_maintenance)
+            # Show maintenance view - only if not already showing it
+            if hasattr(self, 'page_maintenance') and hasattr(self, 'stack'):
+                if self.stack.currentWidget() != self.page_maintenance:
+                    self.stack.setCurrentWidget(self.page_maintenance)
                 # Update message in case it changed
                 self.page_maintenance.update_message()
                 # Hide navigation for end users in maintenance
                 if hasattr(self, 'nav_bar'):
                     self.nav_bar.setVisible(False)
         else:
-            # Show normal dashboard
-            if hasattr(self, 'page_dashboard'):
-                self.stack.setCurrentWidget(self.page_dashboard)
-                # Show navigation
-                if hasattr(self, 'nav_bar'):
-                    self.nav_bar.setVisible(True)
+            # Only switch away from maintenance page if we're currently on it
+            # Don't force dashboard if user is on another page (Settings, Reports, etc.)
+            if hasattr(self, 'stack') and hasattr(self, 'page_maintenance'):
+                if self.stack.currentWidget() == self.page_maintenance:
+                    # User was on maintenance page, switch to dashboard
+                    if hasattr(self, 'page_dashboard'):
+                        self.stack.setCurrentWidget(self.page_dashboard)
+                    # Show navigation
+                    if hasattr(self, 'nav_bar'):
+                        self.nav_bar.setVisible(True)
+                # If user is on any other page, leave them there - don't force dashboard
 
     def highlight_nav(self, active_text):
         """Highlight the active navigation button"""

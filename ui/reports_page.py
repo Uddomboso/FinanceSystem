@@ -250,62 +250,12 @@ class ReportsPage(QWidget):
         income_values = []
         expense_values = []
         
-        # #region agent log
-        import json
-        import time
-        negative_income_days = []
-        negative_expense_days = []
-        # #endregion
-        
         for txn in transactions:
             dates.append(txn['day'])
             income_val = float(txn['income'] or 0)
             expense_val = float(txn['expense'] or 0)
-            
-            # #region agent log
-            if income_val < 0:
-                negative_income_days.append({"day": txn['day'], "value": income_val})
-            if expense_val < 0:
-                negative_expense_days.append({"day": txn['day'], "value": expense_val})
-            # #endregion
-            
             income_values.append(income_val)
             expense_values.append(expense_val)
-        
-        # #region agent log
-        try:
-            total_income_raw = sum(income_values)
-            total_expense_raw = sum(expense_values)
-            
-            # Identify problematic transactions (negative amounts with transaction_type)
-            problem_txns = fetch_all("""
-                SELECT transaction_id, amount, transaction_type, date, description
-                FROM transactions
-                WHERE user_id = ? 
-                  AND date(date) BETWEEN ? AND ?
-                  AND amount < 0
-                ORDER BY date DESC
-            """, (self.user_id, start_date.isoformat(), end_date.isoformat()))
-            
-            problem_list = []
-            if problem_txns:
-                for t in problem_txns[:10]:  # Limit to 10 for brevity
-                    problem_list.append({
-                        "id": t["transaction_id"] if "transaction_id" in t.keys() else None,
-                        "amount": t["amount"] if "amount" in t.keys() else 0,
-                        "type": t["transaction_type"] if "transaction_type" in t.keys() else None,
-                        "date": str(t["date"]) if "date" in t.keys() else "",
-                        "desc": str(t["description"])[:50] if "description" in t.keys() and t["description"] else ""
-                    })
-            
-            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"chart-fix","hypothesisId":"B","location":"reports_page.py:create_chart","message":"Raw aggregated values and problematic transactions","data":{"total_income_raw":total_income_raw,"total_expense_raw":total_expense_raw,"negative_income_days":negative_income_days,"negative_expense_days":negative_expense_days,"problematic_transactions":problem_list,"chart_type":self.chart_type},"timestamp":int(time.time()*1000)}) + '\n')
-        except Exception as e:
-            try:
-                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                    f.write(json.dumps({"sessionId":"debug-session","runId":"chart-fix","hypothesisId":"B","location":"reports_page.py:create_chart","message":"Error logging raw values","data":{"error":str(e)},"timestamp":int(time.time()*1000)}) + '\n')
-            except: pass
-        # #endregion
         
         # Create matplotlib figure
         fig = Figure(figsize=(10, 6), facecolor=p["background"])
@@ -323,14 +273,6 @@ class ReportsPage(QWidget):
             # (Income should never be negative in a bar chart - it's confusing)
             income_display = [max(0, val) for val in income_values]
             expense_display = [max(0, val) for val in expense_values]
-            
-            # #region agent log
-            try:
-                negative_count = sum(1 for v in income_values if v < 0)
-                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                    f.write(json.dumps({"sessionId":"debug-session","runId":"chart-fix","hypothesisId":"B","location":"reports_page.py:create_chart","message":"Bar chart values (clamped)","data":{"negative_income_count":negative_count,"sample_income_before":income_values[:5],"sample_income_after":income_display[:5]},"timestamp":int(time.time()*1000)}) + '\n')
-            except: pass
-            # #endregion
             
             x = range(len(dates))
             width = 0.35
@@ -353,13 +295,6 @@ class ReportsPage(QWidget):
             # Use absolute values for pie chart display
             abs_income = abs(total_income) if total_income != 0 else 0
             abs_expense = abs(total_expense) if total_expense != 0 else 0
-            
-            # #region agent log
-            try:
-                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                    f.write(json.dumps({"sessionId":"debug-session","runId":"chart-fix","hypothesisId":"B","location":"reports_page.py:create_chart","message":"Pie chart values (before/after abs)","data":{"total_income_raw":total_income,"total_expense_raw":total_expense,"abs_income":abs_income,"abs_expense":abs_expense},"timestamp":int(time.time()*1000)}) + '\n')
-            except: pass
-            # #endregion
             
             if abs_income > 0 or abs_expense > 0:
                 labels = []

@@ -182,13 +182,6 @@ class EnhancedPennyWidget(QFrame):
     def send_proactive_tip(self):
         """Send proactive financial tip (with randomness)"""
         if self.should_send_proactive_tip() and random.random() < 0.3:  # 30% chance
-            # #region agent log
-            try:
-                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                    f.write(json.dumps({"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"A","location":"enhanced_penny_widget.py:send_proactive_tip","message":"Proactive tip triggered","data":{"user_id":self.user_id},"timestamp":int(__import__('time').time()*1000)}) + '\n')
-            except: pass
-            # #endregion
-            
             financial_context = _get_financial_context(self.user_id)
             result = generate_penny_message(financial_context)
             
@@ -203,13 +196,6 @@ class EnhancedPennyWidget(QFrame):
                 'needs_attention': 'alert'
             }
             tone = mood_to_tone.get(result['mood'], 'friendly')
-            
-            # #region agent log
-            try:
-                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                    f.write(json.dumps({"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"A","location":"enhanced_penny_widget.py:send_proactive_tip","message":"New pipeline result","data":{"mood":result['mood'],"expression":expression,"tone":tone,"message_preview":result['message'][:50]},"timestamp":int(__import__('time').time()*1000)}) + '\n')
-            except: pass
-            # #endregion
             
             self.update_message(result['message'], tone, expression)
 
@@ -450,13 +436,6 @@ class EnhancedPennyWidget(QFrame):
 
     def request_new_tip(self):
         """Request a new AI tip"""
-        # #region agent log
-        try:
-            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"B","location":"enhanced_penny_widget.py:request_new_tip","message":"New tip requested","data":{"user_id":self.user_id},"timestamp":int(__import__('time').time()*1000)}) + '\n')
-        except: pass
-        # #endregion
-        
         self.update_message("💡 Let me think of something fresh for you...","friendly")
 
         # Use real AI service with delay
@@ -478,13 +457,6 @@ class EnhancedPennyWidget(QFrame):
             'needs_attention': 'alert'
         }
         tone = mood_to_tone.get(result['mood'], 'friendly')
-        
-        # #region agent log
-        try:
-            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"pre-fix","hypothesisId":"B","location":"enhanced_penny_widget.py:_fetch_new_tip","message":"New pipeline result","data":{"mood":result['mood'],"expression":expression,"tone":tone,"message_preview":result['message'][:50]},"timestamp":int(__import__('time').time()*1000)}) + '\n')
-        except: pass
-        # #endregion
         
         self.update_message(result['message'], tone, expression)
 
