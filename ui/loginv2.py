@@ -18,12 +18,24 @@ class LoginWindowV2(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("PennyWise - Login")
-        self.setMinimumSize(1000, 700)
-        self.setStyleSheet("""
-            font-family: Segoe UI;
-            font-size: 16px;
-            background-color: #fffaf5;
-        """)
+        self.setMinimumSize(1200, 750)
+        self.setWindowFlags(Qt.Window | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)
+        
+        # Brand colors
+        self.colors = {
+            'primary': '#d6733a',
+            'accent': '#ffe22a',
+            'dark': '#704b3b',
+            'dark_alt': '#b45131',
+            'neutral': '#b2b3a3',
+            'warm': '#fdbd63',
+            'bg_light': '#fffaf5',
+            'bg_panel': '#fff3e6',
+            'text_primary': '#704b3b',
+            'text_secondary': '#8a6d5b',
+            'white': '#ffffff',
+        }
+        
         self.workos_available = self.check_workos_config()
         self.init_ui()
 
@@ -49,179 +61,286 @@ class LoginWindowV2(QMainWindow):
             return False
 
     def init_ui(self):
+        """Initialize the modern UI"""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
+        
+        # Main layout with no margins for full-width design
         main_layout = QHBoxLayout(central_widget)
-        main_layout.setContentsMargins(40, 40, 40, 40)
-        main_layout.setSpacing(40)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # Left branding panel
-        left_frame = QFrame()
-        left_frame.setFixedWidth(400)
-        left_frame.setStyleSheet("""
-            QFrame {
-                background-color: #fff3e6;
-                border-radius: 20px;
-                padding: 40px;
-            }
+        # Left panel - Branding with gradient background
+        left_panel = self.create_left_panel()
+        
+        # Right panel - Login form
+        right_panel = self.create_right_panel()
+
+        main_layout.addWidget(left_panel, 1)
+        main_layout.addWidget(right_panel, 1)
+
+    def create_left_panel(self):
+        """Create the left branding panel"""
+        panel = QFrame()
+        panel.setFixedWidth(500)
+        
+        # Gradient background using stylesheet
+        panel.setStyleSheet(f"""
+            QFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {self.colors['bg_panel']},
+                    stop:1 {self.colors['bg_light']});
+                border: none;
+            }}
         """)
-        left_layout = QVBoxLayout(left_frame)
-        left_layout.setAlignment(Qt.AlignCenter)
-        left_layout.setSpacing(30)
+        
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(60, 80, 60, 80)
+        layout.setSpacing(40)
+        layout.setAlignment(Qt.AlignCenter)
+
+        # Logo
+        logo_container = QFrame()
+        logo_container.setFixedSize(200, 200)
+        logo_layout = QVBoxLayout(logo_container)
+        logo_layout.setContentsMargins(0, 0, 0, 0)
+        logo_layout.setAlignment(Qt.AlignCenter)
 
         logo = QLabel()
         logo_path = os.path.join("logopng.png")
         if os.path.exists(logo_path):
-            logo.setPixmap(QPixmap(logo_path).scaledToWidth(250, Qt.SmoothTransformation))
+            pixmap = QPixmap(logo_path)
+            scaled = pixmap.scaled(180, 180, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            logo.setPixmap(scaled)
         else:
-            logo.setText("PENNYWISE")
-            logo.setStyleSheet("font-size: 24px; font-weight: bold; color: #704b3b;")
+            logo.setText("PW")
+            logo.setStyleSheet(f"""
+                font-size: 72px;
+                font-weight: 700;
+                color: {self.colors['primary']};
+                font-family: 'Segoe UI', 'Inter', sans-serif;
+            """)
         logo.setAlignment(Qt.AlignCenter)
+        logo_layout.addWidget(logo)
 
-        welcome = QLabel("Welcome to PennyWise")
-        welcome.setAlignment(Qt.AlignCenter)
-        welcome.setStyleSheet("font-size: 22px; font-weight: bold; color: #704b3b; margin-top: 20px;")
+        layout.addStretch()
+        layout.addWidget(logo_container, alignment=Qt.AlignCenter)
+        layout.addStretch()
 
-        desc = QLabel("Sign in with Google to manage your finances.")
-        desc.setWordWrap(True)
-        desc.setAlignment(Qt.AlignCenter)
-        desc.setStyleSheet("color: #8a6d5b; font-size: 15px; margin-top: 10px;")
+        return panel
 
-        left_layout.addWidget(logo)
-        left_layout.addWidget(welcome)
-        left_layout.addWidget(desc)
-        left_layout.addStretch()
-
-        # Right login panel with stacked layout
-        right_frame = QFrame()
-        right_frame.setStyleSheet("""
-            QFrame {
-                background-color: white;
-                border-radius: 20px;
-                padding: 0px;
-            }
+    def create_right_panel(self):
+        """Create the right login panel"""
+        panel = QFrame()
+        panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {self.colors['bg_light']};
+                border: none;
+            }}
         """)
-        right_frame_layout = QVBoxLayout(right_frame)
-        right_frame_layout.setContentsMargins(0, 0, 0, 0)
 
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Stacked layout for different states
         self.stack = QStackedLayout()
         self.workos_ui = self.make_workos_login_ui()
         self.error_ui = self.make_error_ui()
+        
         self.stack.addWidget(self.workos_ui)
         self.stack.addWidget(self.error_ui)
 
-        # Show appropriate panel based on WorkOS availability
+        # Show appropriate panel
         if self.workos_available:
             self.stack.setCurrentIndex(0)
         else:
             self.stack.setCurrentIndex(1)
 
-        right_frame_layout.addLayout(self.stack)
-        main_layout.addWidget(left_frame)
-        main_layout.addWidget(right_frame, 1)
+        layout.addLayout(self.stack)
+
+        return panel
 
     def make_workos_login_ui(self):
-        container = QVBoxLayout()
-        container.setContentsMargins(50, 60, 50, 60)
-        container.setSpacing(30)
-
-        header = QLabel("Welcome Back")
-        header.setAlignment(Qt.AlignCenter)
-        header.setStyleSheet("font-size: 28px; font-weight: bold; color: #704b3b;")
-
-        subheader = QLabel("Sign in with Google to continue")
-        subheader.setAlignment(Qt.AlignCenter)
-        subheader.setStyleSheet("color: #8a6d5b; font-size: 16px;")
-
-        container.addWidget(header)
-        container.addWidget(subheader)
-        container.addSpacing(40)
-
-        # Google OAuth login button
-        workos_btn = QPushButton("Continue with Google")
-        workos_btn.setMinimumHeight(60)
-        workos_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6366f1;
-                color: white;
-                padding: 18px;
-                border: none;
-                border-radius: 10px;
-                font-size: 18px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #4f46e5;
-            }
-            QPushButton:pressed {
-                background-color: #4338ca;
-            }
+        """Create the main login UI"""
+        container = QWidget()
+        container.setStyleSheet(f"""
+            QWidget {{
+                background-color: {self.colors['bg_light']};
+            }}
         """)
-        workos_btn.clicked.connect(self.login_with_workos)
-        container.addWidget(workos_btn)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(80, 100, 80, 100)
+        layout.setSpacing(0)
 
-        container.addStretch()
-        wrap = QWidget()
-        wrap.setLayout(container)
-        return wrap
+        # Header section
+        header_layout = QVBoxLayout()
+        header_layout.setSpacing(16)
+        header_layout.setAlignment(Qt.AlignTop)
+
+        # Welcome title
+        title = QLabel("Welcome")
+        title.setAlignment(Qt.AlignLeft)
+        title.setStyleSheet(f"""
+            QLabel {{
+                font-size: 36px;
+                font-weight: 700;
+                color: {self.colors['text_primary']};
+                font-family: 'Segoe UI', 'Inter', sans-serif;
+                letter-spacing: -0.5px;
+                margin: 0;
+                padding: 0;
+                background-color: transparent;
+            }}
+        """)
+
+        # Subtitle
+        subtitle = QLabel("Sign in to continue to your account")
+        subtitle.setAlignment(Qt.AlignLeft)
+        subtitle.setStyleSheet(f"""
+            QLabel {{
+                font-size: 16px;
+                font-weight: 400;
+                color: {self.colors['text_secondary']};
+                font-family: 'Segoe UI', 'Inter', sans-serif;
+                margin-top: 8px;
+                background-color: transparent;
+            }}
+        """)
+
+        header_layout.addWidget(title)
+        header_layout.addWidget(subtitle)
+        header_layout.addSpacing(60)
+
+        # Google button with modern styling
+        google_btn = QPushButton("  Continue with Google")
+        google_btn.setMinimumHeight(64)
+        google_btn.setCursor(Qt.PointingHandCursor)
+        
+        # Modern button styling with shadow and hover effects
+        google_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {self.colors['white']};
+                color: {self.colors['text_primary']};
+                border: 2px solid #e5e7eb;
+                border-radius: 12px;
+                font-size: 16px;
+                font-weight: 600;
+                font-family: 'Segoe UI', 'Inter', sans-serif;
+                padding: 0px 32px;
+                text-align: center;
+            }}
+            QPushButton:hover {{
+                background-color: {self.colors['bg_light']};
+                border-color: {self.colors['primary']};
+                border-width: 2px;
+            }}
+            QPushButton:pressed {{
+                background-color: {self.colors['bg_panel']};
+                border-color: {self.colors['dark_alt']};
+            }}
+        """)
+        google_btn.clicked.connect(self.login_with_workos)
+
+        # Spacing and alignment
+        layout.addLayout(header_layout)
+        layout.addStretch()
+        layout.addWidget(google_btn)
+        layout.addStretch()
+
+        return container
 
     def make_error_ui(self):
-        container = QVBoxLayout()
-        container.setContentsMargins(50, 60, 50, 60)
-        container.setSpacing(30)
+        """Create error UI when WorkOS is not configured"""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(80, 100, 80, 100)
+        layout.setSpacing(0)
 
-        header = QLabel("WorkOS Not Configured")
-        header.setAlignment(Qt.AlignCenter)
-        header.setStyleSheet("font-size: 28px; font-weight: bold; color: #704b3b;")
+        # Header
+        title = QLabel("WorkOS Not Configured")
+        title.setAlignment(Qt.AlignLeft)
+        title.setStyleSheet(f"""
+            font-size: 36px;
+            font-weight: 700;
+            color: {self.colors['text_primary']};
+            font-family: 'Segoe UI', 'Inter', sans-serif;
+            letter-spacing: -0.5px;
+        """)
 
-        error_msg = QLabel(
-            "WorkOS authentication is not available.\n\n"
-            "To enable WorkOS login, add the following to your .env file:\n\n"
+        subtitle = QLabel("OAuth authentication is not available")
+        subtitle.setAlignment(Qt.AlignLeft)
+        subtitle.setStyleSheet(f"""
+            font-size: 16px;
+            font-weight: 400;
+            color: {self.colors['text_secondary']};
+            font-family: 'Segoe UI', 'Inter', sans-serif;
+            margin-top: 8px;
+        """)
+
+        # Error message box
+        error_box = QFrame()
+        error_box.setStyleSheet("""
+            QFrame {
+                background-color: #fef2f2;
+                border: 1px solid #fecaca;
+                border-radius: 12px;
+                padding: 24px;
+                margin-top: 32px;
+            }
+        """)
+        error_layout = QVBoxLayout(error_box)
+        error_layout.setSpacing(12)
+
+        error_text = QLabel(
+            "To enable Google OAuth login, add the following to your .env file:\n\n"
             "WORKOS_API_KEY=your_api_key\n"
             "WORKOS_CLIENT_ID=your_client_id\n"
             "WORKOS_REDIRECT_URL=http://localhost:8000/authenticate\n\n"
             "After adding these, restart the application."
         )
-        error_msg.setWordWrap(True)
-        error_msg.setAlignment(Qt.AlignCenter)
-        error_msg.setStyleSheet("""
-            color: #dc3545;
+        error_text.setWordWrap(True)
+        error_text.setStyleSheet("""
+            color: #991b1b;
             font-size: 14px;
-            padding: 20px;
-            background-color: #f8d7da;
-            border-radius: 10px;
-            border: 1px solid #f5c6cb;
+            font-family: 'Segoe UI', 'Inter', sans-serif;
+            line-height: 1.6;
         """)
+        error_layout.addWidget(error_text)
 
+        # Retry button
         retry_btn = QPushButton("Check Again")
-        retry_btn.setMinimumHeight(50)
-        retry_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d6733a;
-                color: white;
-                padding: 14px;
+        retry_btn.setMinimumHeight(56)
+        retry_btn.setCursor(Qt.PointingHandCursor)
+        retry_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {self.colors['primary']};
+                color: {self.colors['white']};
                 border: none;
-                border-radius: 10px;
+                border-radius: 12px;
                 font-size: 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #c26634;
-            }
-            QPushButton:pressed {
-                background-color: #a8592d;
-            }
+                font-weight: 600;
+                font-family: 'Segoe UI', 'Inter', sans-serif;
+                padding: 0px 24px;
+            }}
+            QPushButton:hover {{
+                background-color: {self.colors['dark_alt']};
+            }}
+            QPushButton:pressed {{
+                background-color: #a0402a;
+            }}
         """)
         retry_btn.clicked.connect(self.retry_workos_check)
 
-        container.addWidget(header)
-        container.addWidget(error_msg)
-        container.addWidget(retry_btn)
-        container.addStretch()
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+        layout.addSpacing(32)
+        layout.addWidget(error_box)
+        layout.addStretch()
+        layout.addWidget(retry_btn)
+        layout.addStretch()
 
-        wrap = QWidget()
-        wrap.setLayout(container)
-        return wrap
+        return container
 
     def retry_workos_check(self):
         """Retry checking WorkOS configuration"""
@@ -381,10 +500,9 @@ class LoginWindowV2(QMainWindow):
         if admin_emails_env:
             return [e.strip().lower() for e in admin_emails_env.split(",") if e.strip()]
         
-        # Option B: Hardcoded whitelist (fallback)
+        #  Hardcoded admin if .env admin does nit work (fallback)
         hardcoded_admins = [
-            # Add admin emails here, e.g.:
-            # "admin@example.com",
+            "suzanudomboso@gmail.com",
             # "manager@example.com",
         ]
         return [e.lower() for e in hardcoded_admins]

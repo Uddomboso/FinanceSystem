@@ -353,10 +353,10 @@ class MetricsCarousel(QWidget):
                 LIMIT 1
             """, (self.user_id,))
             
-            # Check if savings account exists (any savings account, not just primary)
+            # Check if savings account exists (only primary active savings account)
             savings_account = fetch_one("""
                 SELECT account_id FROM accounts 
-                WHERE user_id = ? AND account_type = 'savings' AND plaid_token IS NOT NULL
+                WHERE user_id = ? AND account_type = 'savings' AND is_primary = 1 AND plaid_token IS NOT NULL
                 LIMIT 1
             """, (self.user_id,))
             
@@ -388,16 +388,30 @@ class MetricsCarousel(QWidget):
                     except Exception as e:
                         logger.error(f"Error fetching checking balance: {e}")
 
-            # Get savings balance - ONLY from Plaid, sum all savings accounts
+            # Get savings balance - ONLY from Plaid, ONLY the active primary savings account
             savings = 0
             if has_savings_account:
+                # #region agent log
+                import json
+                try:
+                    with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a') as f:
+                        f.write(json.dumps({"sessionId":"debug-session","runId":"balance","hypothesisId":"A","location":"dashboard_main.py:391","message":"Fetching savings accounts for balance","data":{"user_id":self.user_id},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+                except: pass
+                # #endregion
                 savings_accounts = fetch_all("""
                     SELECT account_id, plaid_token
                     FROM accounts 
                     WHERE user_id = ? 
                     AND account_type = 'savings'
+                    AND is_primary = 1
                     AND plaid_token IS NOT NULL
                 """,(self.user_id,))
+                # #region agent log
+                try:
+                    with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a') as f:
+                        f.write(json.dumps({"sessionId":"debug-session","runId":"balance","hypothesisId":"A","location":"dashboard_main.py:401","message":"Found savings accounts","data":{"count":len(savings_accounts),"account_ids":[a.get('account_id') for a in savings_accounts]},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+                except: pass
+                # #endregion
                 
                 if savings_accounts:
                     from core.plaid_api import get_account_balances
@@ -639,6 +653,7 @@ class MetricsCarousel(QWidget):
                 FROM accounts 
                 WHERE user_id = ? 
                 AND account_type = 'savings'
+                AND is_primary = 1
                 AND plaid_token IS NOT NULL
             """,(self.user_id,))
             
@@ -2532,7 +2547,7 @@ class CommitmentTrackerWidget(QWidget):
             savings_accounts = fetch_all("""
                 SELECT id, account_id, bank_name, account_type
                 FROM accounts
-                WHERE user_id = ? AND account_type = 'savings'
+                WHERE user_id = ? AND account_type = 'savings' AND is_primary = 1
                 ORDER BY id
                 LIMIT 1
             """, (self.user_id,))
@@ -2849,19 +2864,32 @@ class DashboardMain(QMainWindow):
                     except Exception as e:
                         logger.error(f"Error fetching balance for account {account['account_id']}: {e}")
 
-            # Get savings balance - ONLY from Plaid, no fallback
-            # Get ALL savings accounts (not just primary) to sum all savings balances
+            # Get savings balance - ONLY from Plaid, ONLY the active primary savings account
             savings = 0
+            # #region agent log
+            import json
+            try:
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a') as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"balance","hypothesisId":"A","location":"dashboard_main.py:2866","message":"Fetching savings accounts for rebuild_cards","data":{"user_id":self.user_id},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+            except: pass
+            # #endregion
             plaid_savings_accounts = fetch_all("""
                 SELECT account_id, plaid_token, account_type, bank_name
                 FROM accounts 
                 WHERE user_id = ? 
                 AND account_type = 'savings'
+                AND is_primary = 1
                 AND plaid_token IS NOT NULL
             """,(self.user_id,))
+            # #region agent log
+            try:
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a') as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"balance","hypothesisId":"A","location":"dashboard_main.py:2877","message":"Found savings accounts for rebuild","data":{"count":len(plaid_savings_accounts),"account_ids":[a.get('account_id') for a in plaid_savings_accounts]},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+            except: pass
+            # #endregion
             
             if plaid_savings_accounts:
-                # Get real savings balance from Plaid for all savings accounts
+                # Get real savings balance from Plaid for the active primary savings account
                 for account in plaid_savings_accounts:
                     try:
                         balances_data = get_account_balances(account["plaid_token"])
@@ -2896,10 +2924,10 @@ class DashboardMain(QMainWindow):
             except (KeyError, TypeError, AttributeError):
                 currency = "USD"
 
-            # Check if accounts exist (relaxed: check by is_primary OR account_type)
+            # Check if accounts exist (only primary active savings account)
             has_savings_account = fetch_one("""
                 SELECT account_id FROM accounts 
-                WHERE user_id = ? AND (account_type = 'savings' OR is_primary = 1)
+                WHERE user_id = ? AND account_type = 'savings' AND is_primary = 1
                 LIMIT 1
             """, (self.user_id,))
             
@@ -3451,11 +3479,25 @@ class DashboardMain(QMainWindow):
             LIMIT 1
         """, (self.user_id,))
         
+        # #region agent log
+        import json
+        try:
+            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"accounts","hypothesisId":"B","location":"dashboard_main.py:3454","message":"Fetching active savings account","data":{"user_id":self.user_id},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+        except: pass
+        # #endregion
         active_savings = fetch_one("""
             SELECT account_id FROM accounts 
-            WHERE user_id = ? AND account_type = 'savings'
+            WHERE user_id = ? AND account_type = 'savings' AND is_primary = 1
             LIMIT 1
         """, (self.user_id,))
+        # #region agent log
+        try:
+            with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a') as f:
+                active_savings_id_val = active_savings['account_id'] if active_savings and 'account_id' in active_savings.keys() else None
+                f.write(json.dumps({"sessionId":"debug-session","runId":"accounts","hypothesisId":"B","location":"dashboard_main.py:3461","message":"Active savings account found","data":{"account_id":active_savings_id_val},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+        except: pass
+        # #endregion
         
         active_checking_id = active_checking['account_id'] if active_checking and 'account_id' in active_checking.keys() else None
         active_savings_id = active_savings['account_id'] if active_savings and 'account_id' in active_savings.keys() else None
@@ -3895,23 +3937,88 @@ class DashboardMain(QMainWindow):
                 account_type = None
                 plaid_token = None
             
-            # Unset all primary savings accounts first
-            execute_query("""
-                UPDATE accounts 
-                SET is_primary = 0 
-                WHERE user_id = ? AND is_primary = 1 AND account_type = 'savings'
-            """, (self.user_id,), commit=False)
+            # #region agent log
+            import json
+            try:
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a') as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"set_savings","hypothesisId":"C","location":"dashboard_main.py:3898","message":"Setting account as savings","data":{"account_id":account_id,"user_id":self.user_id},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+            except: pass
+            # #endregion
+            
+            # Unset all primary savings accounts first - commit this change
+            # #region agent log
+            try:
+                unset_result = execute_query("""
+                    UPDATE accounts 
+                    SET is_primary = 0 
+                    WHERE user_id = ? AND is_primary = 1 AND account_type = 'savings'
+                """, (self.user_id,), commit=True)
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a') as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"set_savings","hypothesisId":"C","location":"dashboard_main.py:3955","message":"Unset previous savings accounts","data":{"rows_affected":unset_result.rowcount if hasattr(unset_result,'rowcount') else 'unknown'},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+            except Exception as e:
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a') as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"set_savings","hypothesisId":"C","location":"dashboard_main.py:3955","message":"Error unsetting savings","data":{"error":str(e)},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+            # #endregion
             
             # Set this account as savings account - update both account_type and is_primary
-            execute_query("""
-                UPDATE accounts 
-                SET is_primary = 1, account_type = 'savings'
-                WHERE account_id = ? AND user_id = ?
-            """, (account_id, self.user_id), commit=True)
+            # #region agent log
+            try:
+                set_result = execute_query("""
+                    UPDATE accounts 
+                    SET is_primary = 1, account_type = 'savings'
+                    WHERE account_id = ? AND user_id = ?
+                """, (account_id, self.user_id), commit=True)
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a') as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"set_savings","hypothesisId":"C","location":"dashboard_main.py:3968","message":"Set new savings account","data":{"account_id":account_id,"rows_affected":set_result.rowcount if hasattr(set_result,'rowcount') else 'unknown'},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+            except Exception as e:
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a') as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"set_savings","hypothesisId":"C","location":"dashboard_main.py:3968","message":"Error setting savings","data":{"error":str(e)},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+                raise
+            # #endregion
             
-            # Refresh accounts page immediately to reflect the change
-            # This rebuilds the page with fresh data from database
-            self.refresh_accounts_page()
+            # Verify the update worked and check all savings accounts
+            # #region agent log
+            try:
+                verify_account = fetch_one("""
+                    SELECT account_id, account_type, is_primary
+                    FROM accounts 
+                    WHERE account_id = ? AND user_id = ?
+                """, (account_id, self.user_id))
+                
+                # Also check what the active savings query would return
+                all_savings = fetch_all("""
+                    SELECT account_id, account_type, is_primary
+                    FROM accounts 
+                    WHERE user_id = ? AND account_type = 'savings'
+                """, (self.user_id,))
+                
+                active_savings_check = fetch_one("""
+                    SELECT account_id FROM accounts 
+                    WHERE user_id = ? AND account_type = 'savings' AND is_primary = 1
+                    LIMIT 1
+                """, (self.user_id,))
+                
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a') as f:
+                    verify_data = {}
+                    if verify_account:
+                        verify_data = {
+                            "target_account_id": verify_account.get('account_id') if hasattr(verify_account,'get') else verify_account['account_id'] if 'account_id' in verify_account.keys() else None,
+                            "target_account_type": verify_account.get('account_type') if hasattr(verify_account,'get') else verify_account['account_type'] if 'account_type' in verify_account.keys() else None,
+                            "target_is_primary": verify_account.get('is_primary') if hasattr(verify_account,'get') else verify_account['is_primary'] if 'is_primary' in verify_account.keys() else None
+                        }
+                    verify_data["all_savings_count"] = len(all_savings) if all_savings else 0
+                    verify_data["all_savings"] = [{"id": a.get('account_id') if hasattr(a,'get') else a['account_id'], "is_primary": a.get('is_primary') if hasattr(a,'get') else a['is_primary']} for a in (all_savings or [])]
+                    verify_data["active_savings_id"] = active_savings_check.get('account_id') if active_savings_check and hasattr(active_savings_check,'get') else active_savings_check['account_id'] if active_savings_check and 'account_id' in active_savings_check.keys() else None
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"set_savings","hypothesisId":"C","location":"dashboard_main.py:3979","message":"Verified account after update","data":verify_data,"timestamp":int(__import__('time').time()*1000)}) + '\n')
+            except Exception as e:
+                import traceback
+                with open(r'c:\Users\asus\OneDrive\Desktop\PennyWise\.cursor\debug.log', 'a') as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"set_savings","hypothesisId":"C","location":"dashboard_main.py:3979","message":"Error verifying account","data":{"error":str(e),"traceback":traceback.format_exc()},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+            # #endregion
+            
+            # Small delay to ensure database changes are visible
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(100, self.refresh_accounts_page)
             
             # Refresh dashboard and metrics to show updated savings balance
             self.refresh_dashboard()

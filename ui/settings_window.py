@@ -593,9 +593,9 @@ class SettingsWindow(QWidget):
         """Setup account information settings"""
         group = self.create_settings_group("Account Information", "fa5s.user")
         
-        # Username
+        # Name (read-only, displays username)
         username_layout = QHBoxLayout()
-        username_label = QLabel("Username:")
+        username_label = QLabel("Name:")
         username_label.setFont(QFont("Segoe UI", 12))
         username_label.setStyleSheet(f"color: {self._palette['text_primary']};")
         username_label.setFixedWidth(120)
@@ -603,12 +603,21 @@ class SettingsWindow(QWidget):
         
         self.username_edit = QLineEdit()
         self.username_edit.setFont(QFont("Segoe UI", 12))
-        self._register_lineedit(self.username_edit)
+        self.username_edit.setReadOnly(True)
+        self.username_edit.setStyleSheet(f"""
+            QLineEdit {{
+                background: {self._palette.get('surface_alt', self._palette['surface'])};
+                color: {self._palette['text_secondary']};
+                border: 1px solid {self._palette['border']};
+                border-radius: 6px;
+                padding: 8px 12px;
+            }}
+        """)
         username_layout.addWidget(self.username_edit)
         username_layout.addStretch()
         group.layout().addLayout(username_layout)
         
-        # Email
+        # Email (read-only)
         email_layout = QHBoxLayout()
         email_label = QLabel("Email:")
         email_label.setFont(QFont("Segoe UI", 12))
@@ -618,33 +627,20 @@ class SettingsWindow(QWidget):
         
         self.email_edit = QLineEdit()
         self.email_edit.setFont(QFont("Segoe UI", 12))
+        self.email_edit.setReadOnly(True)
         self.email_edit.setPlaceholderText("user@example.com")
-        self._register_lineedit(self.email_edit)
+        self.email_edit.setStyleSheet(f"""
+            QLineEdit {{
+                background: {self._palette.get('surface_alt', self._palette['surface'])};
+                color: {self._palette['text_secondary']};
+                border: 1px solid {self._palette['border']};
+                border-radius: 6px;
+                padding: 8px 12px;
+            }}
+        """)
         email_layout.addWidget(self.email_edit)
         email_layout.addStretch()
         group.layout().addLayout(email_layout)
-
-        # Change password button
-        password_layout = QHBoxLayout()
-        password_layout.setContentsMargins(120, 12, 0, 0)
-        self.change_password_btn = QPushButton("Change Password")
-        self.change_password_btn.setFont(QFont("Segoe UI", 12))
-        self.change_password_btn.setStyleSheet("""
-            QPushButton {
-                background: #3B82F6;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 10px 20px;
-            }
-            QPushButton:hover {
-                background: #2563EB;
-            }
-        """)
-        self.change_password_btn.clicked.connect(self.change_password)
-        password_layout.addWidget(self.change_password_btn)
-        password_layout.addStretch()
-        group.layout().addLayout(password_layout)
         
         page = QWidget()
         page_layout = QVBoxLayout(page)
@@ -1031,23 +1027,8 @@ class SettingsWindow(QWidget):
                 commit=True,
             )
             
-            # Update user information
-            email_value = self.email_edit.text().strip()
-            if not email_value:
-                # If email is empty, use a default placeholder
-                email_value = f"user{self.user_id}@pennywise.local"
-            
-            user_info = fetch_one("SELECT username, email FROM users WHERE user_id = ?", (self.user_id,))
-            username_value = self.username_edit.text().strip()
-            if not username_value:
-                username_value = user_info['username'] if user_info and 'username' in user_info.keys() else f"user{self.user_id}"
-            execute_query("""
-                UPDATE users SET username = ?, email = ? WHERE user_id = ?
-            """, (
-                username_value,
-                email_value,
-                self.user_id
-            ), commit=True)
+            # Do NOT update user information (email, username) - fields are read-only
+            # These fields are displayed for information only and cannot be changed through the UI
             
             # Emit settings changed signal
             self.settings_changed.emit(settings_data)

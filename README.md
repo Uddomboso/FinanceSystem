@@ -22,6 +22,7 @@
 ### What Makes PennyWise Special?
 
 - **AI-Powered Insights**: Get personalized financial advice powered by GROQ AI
+- **Secure Authentication**: OAuth-based login with WorkOS (Google OAuth supported)
 - **Bank Integration**: Connect your bank accounts securely via Plaid API (11,000+ banks supported)
 - **Real-Time Tracking**: Monitor your finances with live transaction updates and balance syncing
 - **Modern UI**: Beautiful, responsive interface with dark/light themes
@@ -45,10 +46,18 @@ AI and API keys are stored securely in a `.env` file located in the root directo
 
 **Example `.env` file structure**:
 ```env
+# AI Configuration (Optional - app works in demo mode without this)
 GROQ_API_KEY=your_groq_api_key_here
+
+# Plaid Configuration (Optional - app works in demo mode without this)
 PLAID_CLIENT_ID=your_plaid_client_id
 PLAID_SECRET=your_plaid_secret
 PLAID_BASE_URL=https://sandbox.plaid.com
+
+# WorkOS Authentication (Optional - traditional login available without this)
+WORKOS_API_KEY=your_workos_api_key
+WORKOS_CLIENT_ID=your_workos_client_id
+WORKOS_REDIRECT_URL=http://localhost:8000/authenticate
 ```
 
 **Security Notes**:
@@ -99,6 +108,7 @@ PLAID_BASE_URL=https://sandbox.plaid.com
 
 ### Core Functionality
 - User authentication system with secure password hashing (bcrypt)
+- WorkOS OAuth integration for Google sign-in (optional)
 - Login and signup windows with validation
 - Main dashboard with financial overview
 - SQLite database with 15+ tables and proper relationships
@@ -169,6 +179,7 @@ PLAID_BASE_URL=https://sandbox.plaid.com
 
 ### Security & Data Management
 - Password encryption with bcrypt
+- WorkOS OAuth authentication with secure token handling
 - Secure API key storage in environment variables
 - Input validation and sanitization
 - SQLite database with proper relationships
@@ -255,6 +266,7 @@ PLAID_BASE_URL=https://sandbox.plaid.com
 ### **AI & APIs**
 - **GROQ API** - Fast AI inference for financial advice
 - **Plaid API** - Secure bank account integration
+- **WorkOS** - Enterprise authentication and user management
 - **OpenAI-Compatible** - Flexible AI integration
 
 ### **Security**
@@ -308,11 +320,12 @@ pip install requests==2.31.0
 pip install bcrypt==4.0.1
 pip install qtawesome
 pip install typing_extensions
+pip install workos
 ```
 
 **Or install all at once:**
 ```bash
-pip install PyQt5==5.15.9 PyQtWebEngine Flask python-dotenv==1.0.0 requests==2.31.0 bcrypt==4.0.1 qtawesome typing_extensions
+pip install PyQt5==5.15.9 PyQtWebEngine Flask python-dotenv==1.0.0 requests==2.31.0 bcrypt==4.0.1 qtawesome typing_extensions workos
 ```
 
 #### **4. Configure Environment Variables**
@@ -327,9 +340,14 @@ GROQ_API_KEY=your_groq_api_key_here
 PLAID_CLIENT_ID=your_plaid_client_id
 PLAID_SECRET=your_plaid_secret
 PLAID_BASE_URL=https://sandbox.plaid.com
+
+# WorkOS Authentication (Optional - traditional login available without this)
+WORKOS_API_KEY=your_workos_api_key
+WORKOS_CLIENT_ID=your_workos_client_id
+WORKOS_REDIRECT_URL=http://localhost:8000/authenticate
 ```
 
-**Note:** The application can run in **Demo Mode** without API keys, using mock data for testing purposes.
+**Note:** The application can run in **Demo Mode** without API keys, using mock data for testing purposes. WorkOS authentication is optional - traditional username/password login is always available.
 
 #### **5. Initialize the Database**
 
@@ -373,10 +391,11 @@ PennyWise can run in two modes:
 #### **Live Mode**
 - Requires GROQ API key for AI features
 - Requires Plaid credentials for bank integration
+- Optional WorkOS credentials for OAuth authentication
 - Connects to real financial institutions
 - Full production functionality
 
-The application automatically detects which mode to use based on your `.env` configuration.
+The application automatically detects which mode to use based on your `.env` configuration. WorkOS authentication is optional - if not configured, users can still log in with traditional username/password.
 
 ### **Getting API Keys**
 
@@ -392,6 +411,18 @@ The application automatically detects which mode to use based on your `.env` con
 3. Get your `client_id` and `secret` from the dashboard
 4. Add them to your `.env` file
 5. Use sandbox mode for testing, production for live accounts
+
+#### **WorkOS Credentials** (For OAuth Authentication - Optional)
+1. Visit [WorkOS Dashboard](https://dashboard.workos.com/)
+2. Sign up or log in to your account
+3. Create a new project or select an existing one
+4. Navigate to **Configuration** → **API Keys** to get your API key
+5. Navigate to **User Management** → **Connections** to create a Google OAuth connection
+6. Get your `client_id` from the connection settings
+7. Set `WORKOS_REDIRECT_URL` to `http://localhost:8000/authenticate` (or your preferred callback URL)
+8. Add all three values to your `.env` file
+
+**Note:** WorkOS authentication is optional. If not configured, users can still authenticate using traditional username/password login.
 
 ---
 
@@ -409,6 +440,7 @@ PennyWise/
 ├── core/                    # Core business logic
 │   ├── config.py           # Configuration management
 │   ├── plaid_api.py        # Plaid API integration
+│   ├── workos_auth.py      # WorkOS OAuth authentication
 │   ├── budget.py           # Budget management
 │   ├── transactions.py     # Transaction handling
 │   ├── commitment_manager.py  # Recurring payments
@@ -423,6 +455,7 @@ PennyWise/
 ├── ui/                      # User interface
 │   ├── dashboard_main.py   # Main dashboard (4,915 lines)
 │   ├── login_window.py     # Login/signup
+│   ├── loginv2.py          # Enhanced login with WorkOS OAuth
 │   ├── settings_window.py  # User settings
 │   ├── components/         # Reusable UI components
 │   │   ├── enhanced_penny_widget.py
@@ -444,8 +477,8 @@ PennyWise/
 ### **First Launch**
 
 1. **Start the Application**: Run `python main.py`
-2. **Create Account**: Sign up with a username, email, and password
-3. **Login**: Use your credentials to access the dashboard
+2. **Create Account**: Sign up with a username, email, and password, or use WorkOS OAuth (if configured) to sign in with Google
+3. **Login**: Use your credentials or OAuth provider to access the dashboard
 4. **Tutorial**: Follow the built-in tutorial to learn the interface
 
 ### **Connecting Your Bank** (Optional)
@@ -501,6 +534,13 @@ PennyWise/
 - Check your internet connection
 - The app will work in demo mode if API key is missing
 
+#### **WorkOS Authentication Issues**
+- Verify WORKOS_API_KEY, WORKOS_CLIENT_ID, and WORKOS_REDIRECT_URL are set in `.env`
+- Ensure WORKOS_REDIRECT_URL matches your WorkOS connection configuration
+- Check that port 8000 (or your configured port) is not in use by another application
+- WorkOS authentication is optional - traditional login will work if WorkOS is not configured
+- Install the workos package: `pip install workos`
+
 #### **UI Rendering Issues**
 - Update PyQt5: `pip install --upgrade PyQt5`
 - Check your display scaling settings
@@ -533,6 +573,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - **Plaid** - For secure bank account integration
 - **GROQ** - For fast AI inference
+- **WorkOS** - For enterprise authentication and user management
 - **PyQt5** - For the excellent GUI framework
 - **QtAwesome** - For beautiful icons
 
