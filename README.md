@@ -8,8 +8,8 @@
 
 *A modern, AI-powered personal finance management application built with PyQt5*
 
-[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
-[![PyQt5](https://img.shields.io/badge/PyQt5-5.15.9-green.svg)](https://www.riverbankcomputing.com/software/pyqt/)
+[![Python 3.8+](https://img.shields.io/badge/Python-3.8+-blue)](https://www.python.org/)
+[![PyQt5 5.15.9](https://img.shields.io/badge/PyQt5-5.15.9-green)](https://www.riverbankcomputing.com/software/pyqt/)
 
 </div>
 
